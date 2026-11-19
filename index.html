@@ -1,0 +1,1648 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hệ thống Điều độ Sản xuất Song song · Gantt &amp; Heijunka</title>
+<style>
+:root {
+  --bg: #F8FAFC;
+  --card: #FFFFFF;
+  --surface: #F1F5F9;
+  --ink: #0F172A;
+  --ink-sec: #334155;
+  --mut: #64748B;
+  --line: #E2E8F0;
+  --line-strong: #CBD5E1;
+  --acc: #0F766E;
+  --acc-hover: #0D9488;
+  --acc-soft: #F0FDFA;
+  --fine-bar: #0F766E;
+  --fine-bar-2: #115E59;
+  --chisel-bar: #1D4ED8;
+  --chisel-bar-2: #1E40AF;
+  --danger: #DC2626;
+  --danger-soft: #FEF2F2;
+  --danger-border: #FCA5A5;
+  --warn: #D97706;
+  --warn-soft: #FFFBEB;
+  --edit-bg: #EFF6FF;
+  --edit-border: #93C5FD;
+  --chip: #F1F5F9;
+  --sidebar-w: 258px;
+  --header-h: 96px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.45 'Inter', 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular numbers for vertical alignment of quantities, timestamps, and dates */
+.n, .kpi b, .axis, .day-pill, .trk-card, .mach-card, .badge-src,
+input[type="number"], input[type="date"], .seg-lbl, .sh-cell, .ofoot, td, th {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== TOP APP HEADER & CONTROL TOOLBAR ===== */
+.app-header {
+  background: var(--card);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.brand-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--line);
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.brand-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+h1 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.brand-sub {
+  margin: 0;
+  color: var(--mut);
+  font-size: 12px;
+}
+
+.top-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 18px;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: #FAFBFD;
+}
+
+.tb-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tb-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--line-strong);
+  margin: 0 4px;
+}
+
+.tb-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--mut);
+  margin-right: 2px;
+}
+
+.badge-src {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--ink-sec);
+}
+.badge-src .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.badge-src.fine .dot { background: var(--fine-bar); }
+.badge-src.chisel .dot { background: var(--chisel-bar); }
+.badge-src.loaded {
+  border-color: #99F6E4;
+  background: var(--acc-soft);
+  color: #115E59;
+}
+.badge-src.chisel.loaded {
+  border-color: #BFDBFE;
+  background: #EFF6FF;
+  color: #1E40AF;
+}
+
+/* ===== MAIN WORKSPACE & COLLAPSIBLE SIDEBAR ===== */
+main {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  gap: 14px;
+  padding: 12px 18px 36px;
+  align-items: start;
+  transition: grid-template-columns 0.18s ease;
+}
+
+body.sidebar-collapsed main {
+  grid-template-columns: 1fr;
+}
+
+body.sidebar-collapsed aside.sidebar {
+  display: none;
+}
+
+@media (max-width: 960px) {
+  main { grid-template-columns: 1fr; }
+  aside.sidebar {
+    position: static;
+    top: auto;
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+
+aside.sidebar {
+  position: sticky;
+  top: calc(var(--header-h) + 10px);
+  max-height: calc(100vh - var(--header-h) - 22px);
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.ctrl-disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+input:disabled, select:disabled {
+  background: var(--surface);
+  color: var(--mut);
+  cursor: not-allowed;
+}
+
+.shift-warn-banner {
+  margin: 0 0 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--danger-border);
+  background: var(--danger-soft);
+  color: #991B1B;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.sku-head-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 10px;
+  margin-bottom: 8px;
+}
+.sku-search-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.app-toast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 9998;
+  display: none;
+  align-items: center;
+  gap: 10px;
+  background: #0F172A;
+  color: #F8FAFC;
+  padding: 9px 13px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.32);
+  border: 1px solid #334155;
+  max-width: 420px;
+}
+.app-toast.show { display: flex; }
+.app-toast button {
+  padding: 3px 9px;
+  font-size: 12px;
+  background: #F59E0B;
+  color: #0F172A;
+  border-color: #F59E0B;
+  font-weight: 700;
+}
+.app-toast button:hover {
+  background: #FBBF24;
+  border-color: #FBBF24;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  min-width: 0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02);
+}
+
+.card h2 {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0 0 8px;
+  color: var(--ink);
+}
+
+h3 {
+  font-size: 11px;
+  font-weight: 700;
+  margin: 12px 0 6px;
+  color: var(--mut);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+h3:first-of-type {
+  border-top: 0;
+  padding-top: 4px;
+}
+
+label {
+  display: block;
+  margin: 6px 0 2px;
+  color: var(--ink-sec);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.chk {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  margin: 6px 0;
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.chk input {
+  width: 15px;
+  height: 15px;
+  margin: 1px 0 0;
+  accent-color: var(--acc);
+  flex-shrink: 0;
+}
+
+input[type="number"], input[type="date"], input[type="text"], select {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+  transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
+}
+
+input[type="number"]:hover, input[type="date"]:hover, input[type="text"]:hover, select:hover {
+  border-color: #94A3B8;
+}
+
+input[type="number"]:focus, input[type="date"]:focus, input[type="text"]:focus, select:focus {
+  outline: none;
+  border-color: var(--acc);
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.16);
+}
+
+.shift {
+  display: grid;
+  grid-template-columns: 1fr 72px;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  margin-bottom: 5px;
+}
+.shift .chk { margin: 0; font-weight: 600; font-size: 12px; }
+.shift input[type="number"] { text-align: right; padding: 3px 6px; }
+
+/* Machine cards in sidebar */
+.mach-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 6px 0 8px;
+}
+.mach-card {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 6px 8px;
+  background: var(--bg);
+  font-size: 11.5px;
+}
+.mach-card.active {
+  background: #F8FAFC;
+  border-color: #CBD5E1;
+}
+.mach-card.standby {
+  opacity: 0.85;
+  border-style: dashed;
+}
+.mach-card-hd {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+.m-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.m-badge.pri { background: #CCFBF1; color: #115E59; }
+.m-badge.stby { background: #E2E8F0; color: #475569; }
+.m-badge.act-bkp { background: #FEF3C7; color: #92400E; }
+.mach-bar {
+  height: 4px;
+  background: var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 4px 0 3px;
+}
+.mach-fill {
+  height: 100%;
+  background: var(--acc);
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.row > input, .row > select { flex: 1; min-width: 130px; }
+
+.btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 4px 0;
+}
+
+button {
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+button:hover {
+  background: var(--surface);
+  border-color: #94A3B8;
+}
+button.pri {
+  background: var(--acc);
+  color: #FFFFFF;
+  border-color: var(--acc);
+  font-weight: 600;
+}
+button.pri:hover {
+  background: var(--acc-hover);
+  border-color: var(--acc-hover);
+}
+button.chisel-btn {
+  background: #EFF6FF;
+  color: #1E40AF;
+  border-color: #BFDBFE;
+  font-weight: 600;
+}
+button.chisel-btn:hover {
+  background: #DBEAFE;
+}
+button.fine-btn {
+  background: #F0FDFA;
+  color: #115E59;
+  border-color: #99F6E4;
+  font-weight: 600;
+}
+button.fine-btn:hover {
+  background: #CCFBF1;
+}
+button.sm {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+button.danger-soft {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-weight: 600;
+}
+button.danger-soft:hover:not(:disabled) {
+  background: #FEE2E2;
+  border-color: var(--danger);
+}
+button.warn-soft {
+  border-color: #FCD34D;
+  background: var(--warn-soft);
+  color: #92400E;
+  font-weight: 600;
+}
+button.warn-soft:hover:not(:disabled) {
+  background: #FEF3C7;
+  border-color: var(--warn);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+button:disabled:hover {
+  background: var(--card);
+  border-color: var(--line-strong);
+}
+button.danger-soft:disabled:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+}
+
+/* Thanh lọc & xóa nhanh mã số lượng ít */
+.purge-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 7px 10px;
+  margin: 6px 0 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+}
+label.purge-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  font-weight: 600;
+  color: var(--ink-sec);
+}
+label.purge-field input[type="number"] {
+  width: 82px;
+  padding: 3px 6px;
+  text-align: right;
+  font-size: 12px;
+}
+.purge-bar .chk {
+  margin: 0;
+  font-size: 12px;
+  align-items: center;
+  gap: 5px;
+}
+.purge-preview {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mut);
+  font-variant-numeric: tabular-nums;
+}
+.purge-preview.has-match {
+  color: var(--danger);
+}
+.btn-del-sku {
+  padding: 2px 7px;
+  font-size: 11.5px;
+  line-height: 1.25;
+}
+
+/* ===== KPI STRIP ===== */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.kpi.wide { grid-column: 1 / -1; }
+@media (max-width: 1150px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .kpis { grid-template-columns: 1fr; } }
+
+.kpi {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 12px;
+}
+.kpi span {
+  display: block;
+  color: var(--mut);
+  font-size: 11.5px;
+}
+.kpi b {
+  display: block;
+  font-size: 17px;
+  font-weight: 700;
+  margin: 2px 0;
+  color: var(--ink);
+}
+.kpi .sub-note {
+  font-size: 11.5px;
+  color: var(--acc);
+  font-weight: 600;
+  margin: 2px 0 3px;
+}
+.kpi.warn {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+.kpi.warn b { color: var(--danger); }
+
+details.smed {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: var(--bg);
+}
+details.smed summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--ink);
+  outline: none;
+}
+
+/* ===== GANTT CHART & STICKY RULER / LEFT COLUMN ===== */
+.g-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.day-pills {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  margin: 6px 0 10px;
+  align-items: center;
+}
+
+.day-pill {
+  padding: 4px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  color: var(--ink-sec);
+  cursor: pointer;
+}
+.day-pill:hover { background: var(--surface); }
+.day-pill.pri {
+  background: var(--acc);
+  color: #FFFFFF;
+  border-color: var(--acc);
+  font-weight: 600;
+}
+.sun-pill {
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748B;
+  border: 1px dashed #CBD5E1;
+  background: repeating-linear-gradient(135deg, #F1F5F9 0 5px, #E2E8F0 5px 10px);
+}
+
+.gantt-viewport {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 360px;
+}
+
+.gantt-inner {
+  min-width: 720px;
+  position: relative;
+}
+
+.gantt-sticky-top {
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  background: #F8FAFC;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.sh-band-row {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  align-items: stretch;
+}
+
+.sh-corner {
+  position: sticky;
+  left: 0;
+  z-index: 16;
+  background: #F1F5F9;
+  border-right: 1px solid var(--line-strong);
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-sec);
+  display: flex;
+  align-items: center;
+}
+
+.sh-band {
+  display: grid;
+  font-size: 11.5px;
+  background: #F8FAFC;
+}
+
+.sh-cell {
+  padding: 4px 8px;
+  border-right: 1px solid var(--line);
+  font-weight: 600;
+  color: var(--ink-sec);
+  text-align: center;
+}
+.sh-cell:last-child { border-right: 0; }
+
+.axis-row {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  background: #FFFFFF;
+  border-top: 1px solid var(--line);
+}
+
+.axis-corner {
+  position: sticky;
+  left: 0;
+  z-index: 16;
+  background: #F8FAFC;
+  border-right: 1px solid var(--line-strong);
+  padding: 2px 8px;
+  font-size: 10.5px;
+  color: var(--mut);
+}
+
+.axis {
+  position: relative;
+  height: 20px;
+  font-size: 11px;
+  color: var(--mut);
+}
+.axis span {
+  position: absolute;
+  top: 2px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.axis span.boundary-06 {
+  font-weight: 700;
+  color: var(--ink-sec);
+}
+
+.lane {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  align-items: stretch;
+  border-bottom: 1px solid var(--line);
+}
+.lane:last-child { border-bottom: 0; }
+
+.lane-hdr {
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  background: var(--card);
+  border-right: 1px solid var(--line-strong);
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.track {
+  position: relative;
+  height: 36px;
+  background: #F8FAFC;
+  overflow: hidden;
+}
+.track.intraday {
+  height: 44px;
+}
+
+body.density-compact .track { height: 28px; }
+body.density-compact .track.intraday { height: 34px; }
+body.density-compact .lane-hdr { padding: 3px 8px; }
+
+.seg {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 4px;
+  overflow: hidden;
+  transition: filter 0.1s;
+}
+.seg:hover {
+  filter: brightness(1.08);
+  z-index: 6;
+}
+
+/* Distinct low-glare industrial shades for FINE (Teal) and CHISEL (Blue) */
+.seg.fam-F {
+  background: linear-gradient(180deg, var(--fine-bar) 0%, var(--fine-bar-2) 100%);
+  border: 1px solid #0F524C;
+}
+.seg.fam-C {
+  background: linear-gradient(180deg, var(--chisel-bar) 0%, var(--chisel-bar-2) 100%);
+  border: 1px solid #1E3A8A;
+}
+
+/* High-contrast red border strictly for Late / At-Risk POs */
+.seg.po-alert {
+  box-shadow: inset 0 0 0 2px #EF4444, 0 0 0 1px #DC2626;
+}
+
+/* Subtle colour-group indicator bar along the bottom of each segment */
+.seg-hue-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  pointer-events: none;
+}
+
+.seg-lbl {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #FFFFFF;
+  text-shadow: 0 1px 2px rgba(15, 23, 42, 0.55);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.co {
+  background: repeating-linear-gradient(45deg, #64748B 0 3px, #94A3B8 3px 6px);
+  border: 1px solid #475569;
+}
+.co .seg-lbl {
+  color: #FFFFFF;
+  background: rgba(15, 23, 42, 0.45);
+  font-size: 10px;
+}
+
+.idle {
+  background: repeating-linear-gradient(135deg, rgba(220, 38, 38, 0.13) 0 5px, rgba(220, 38, 38, 0.03) 5px 10px);
+  border: 1px dashed rgba(220, 38, 38, 0.55);
+}
+.idle .seg-lbl {
+  color: #B91C1C;
+  text-shadow: none;
+  font-weight: 600;
+  font-size: 10.5px;
+}
+
+/* Sunday shutdown hatch window (06:00 CN -> 06:00 T2) */
+.sun-hatch {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  transform: translateX(-3px);
+  background: repeating-linear-gradient(135deg, #64748B 0 2px, #E2E8F0 2px 5px);
+  border-left: 1px solid #475569;
+  border-right: 1px solid #475569;
+  z-index: 5;
+  cursor: help;
+}
+
+.idle-txt {
+  font-size: 10.5px;
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.hr-grid {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed rgba(100, 116, 139, 0.22);
+  pointer-events: none;
+}
+.hr-grid.shift-sep {
+  border-left: 1.5px solid rgba(15, 23, 42, 0.28);
+}
+
+.day-col {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed rgba(100, 116, 139, 0.25);
+  cursor: pointer;
+  z-index: 2;
+}
+.day-col:hover {
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  color: var(--ink-sec);
+  font-size: 11.5px;
+  margin-top: 8px;
+  align-items: center;
+}
+
+.sw {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  margin-right: 5px;
+  vertical-align: -2px;
+}
+.sw.fine { background: var(--fine-bar); }
+.sw.chisel { background: var(--chisel-bar); }
+.sw.po-late { background: #FFFFFF; border: 2px solid var(--danger); }
+.sw.sun { background: repeating-linear-gradient(135deg, #64748B 0 2px, #E2E8F0 2px 5px); border: 1px solid #475569; }
+
+/* Floating Rich Tooltip */
+.gantt-tooltip {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  background: #0F172A;
+  color: #F8FAFC;
+  padding: 8px 11px;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.45;
+  max-width: 340px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.28);
+  border: 1px solid #334155;
+  display: none;
+}
+.gantt-tooltip .tt-hd {
+  font-weight: 700;
+  font-size: 12.5px;
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #334155;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.gantt-tooltip .tt-tag {
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+.gantt-tooltip .tt-tag.F { background: #0F766E; color: #FFF; }
+.gantt-tooltip .tt-tag.C { background: #1D4ED8; color: #FFF; }
+.gantt-tooltip .tt-tag.idle { background: #DC2626; color: #FFF; }
+
+/* ===== DAILY TRACKER ===== */
+.tracker {
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.trk-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(235px, 1fr));
+  gap: 8px;
+  margin-top: 6px;
+}
+.trk-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--bg);
+  font-size: 12px;
+}
+.trk-card.manual-override {
+  background: var(--edit-bg);
+  border-color: var(--edit-border);
+}
+.trk-bar {
+  height: 6px;
+  background: var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 5px 0;
+}
+.trk-fill {
+  height: 100%;
+  background: var(--acc);
+  transition: width 0.2s;
+}
+
+/* ===== SPLIT-VIEW TABLES & STICKY HEADERS / LEFT COLUMNS ===== */
+table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+
+th, td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+  background: var(--card);
+}
+
+body.density-compact th,
+body.density-compact td {
+  padding: 3px 6px;
+  font-size: 12px;
+}
+
+th {
+  color: var(--ink-sec);
+  font-weight: 700;
+  font-size: 12px;
+  background: #F1F5F9;
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+/* Sticky left columns in SKU schedule table */
+#skus th:nth-child(1),
+#skus td:nth-child(1) {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  width: 38px;
+  min-width: 38px;
+}
+#skus th:nth-child(2),
+#skus td:nth-child(2) {
+  position: sticky;
+  left: 38px;
+  z-index: 5;
+  border-right: 1px solid var(--line-strong);
+  font-weight: 700;
+}
+#skus th:nth-child(1),
+#skus th:nth-child(2) {
+  z-index: 11;
+  background: #E2E8F0;
+}
+
+tr:hover td {
+  background: #F8FAFC;
+}
+
+.n { text-align: right; }
+
+.scroll {
+  overflow: auto;
+  max-height: 440px;
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+/* Inline editable cells & manual override highlight */
+.cell-in {
+  padding: 3px 6px;
+  font-size: 12.5px;
+  min-width: 88px;
+  width: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--card);
+}
+.cell-in:hover {
+  border-color: #64748B;
+}
+.cell-in:focus {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.18);
+}
+.cell-in.is-edited {
+  background: var(--edit-bg);
+  border-color: #60A5FA;
+  color: #1E3A8A;
+  font-weight: 600;
+}
+
+.fam-pill {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.fam-pill.F { background: #CCFBF1; color: #115E59; }
+.fam-pill.C { background: #DBEAFE; color: #1E40AF; }
+
+.late-row td {
+  background: var(--danger-soft) !important;
+}
+.badge-late {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--danger);
+  color: #FFFFFF;
+  font-size: 11px;
+  font-weight: 600;
+}
+.badge-ok {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #DCFCE7;
+  color: #166534;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ===== PRODUCTION ORDER SLIPS (SHOP-PACKET STANDARD & PRINT AREA) ===== */
+.order {
+  border: 1.5px solid #0F172A;
+  border-radius: 6px;
+  padding: 12px 14px;
+  margin: 14px 0;
+  background: #FFFFFF;
+  color: #0F172A;
+  overflow-x: auto;
+}
+
+.oh-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+  align-items: stretch;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 2px solid #0F172A;
+}
+
+.oh-left {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+}
+
+.oh-org {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #475569;
+}
+
+.oh-title {
+  font-size: 17px;
+  font-weight: 800;
+  color: #0F172A;
+  letter-spacing: -0.01em;
+}
+
+.oh-meta {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0F172A;
+  margin-top: 2px;
+}
+
+.oh-docbox {
+  border: 1px solid #0F172A;
+  border-radius: 4px;
+  padding: 6px 10px;
+  background: #F8FAFC;
+  font-size: 11.5px;
+  line-height: 1.5;
+  min-width: 265px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.oh-docbox div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.oh-docbox span.lbl {
+  color: #475569;
+  font-weight: 600;
+}
+
+.oh-docbox b {
+  color: #0F172A;
+  font-weight: 700;
+}
+
+.order table {
+  width: 100%;
+  min-width: 820px;
+  table-layout: fixed;
+  border-collapse: collapse;
+  border: 1px solid #0F172A;
+  font-size: 12.5px;
+}
+
+.order table th,
+.order table td {
+  color: #0F172A;
+  border: 1px solid #64748B;
+  position: static;
+  background: #FFFFFF;
+  padding: 6px 8px;
+  vertical-align: middle;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.order table tbody tr {
+  min-height: 38px;
+  height: 38px;
+}
+
+.order table th {
+  background: #F1F5F9;
+  border-bottom: 1.5px solid #0F172A;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-align: left;
+  color: #0F172A;
+}
+
+.order table th.c,
+.order table td.c {
+  text-align: center;
+}
+
+.order table th.n,
+.order table td.n {
+  text-align: right;
+}
+
+.order .col-code {
+  font-size: 14px;
+  font-weight: 800;
+  color: #0F172A;
+  letter-spacing: 0.01em;
+}
+
+.order .col-sap {
+  font-variant-numeric: tabular-nums;
+  color: #1E293B;
+  font-weight: 500;
+}
+
+.order .time-slot {
+  font-weight: 700;
+  color: #0F172A;
+  font-size: 12.5px;
+  line-height: 1.25;
+}
+
+.order .time-dur {
+  font-size: 11px;
+  color: #475569;
+  margin-top: 2px;
+  line-height: 1.2;
+}
+
+.order .col-target {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: #0F172A;
+}
+
+.order .write-cell {
+  width: 90px;
+  min-width: 78px;
+  padding: 4px 5px;
+}
+
+.order .write-box {
+  height: 26px;
+  border: 1px dashed #64748B;
+  border-radius: 3px;
+  background: #FFFFFF;
+}
+
+.order .note-cell {
+  white-space: normal;
+  min-width: 150px;
+  line-height: 1.35;
+}
+
+.ord-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  margin-right: 5px;
+  vertical-align: baseline;
+  border: 1px solid #0F172A;
+}
+.ord-tag.pri1 {
+  background: #FEF2F2;
+  color: #991B1B;
+  border-color: #DC2626;
+}
+.ord-tag.pull {
+  background: #FFFBEB;
+  color: #92400E;
+  border-color: #D97706;
+}
+
+.handover-txt {
+  font-size: 12px;
+  color: #0F172A;
+  font-weight: 500;
+}
+
+/* Tier 1: Shift summary strip */
+.ofoot-summary {
+  margin-top: 8px;
+  padding: 7px 12px;
+  background: #F8FAFC;
+  border: 1px solid #0F172A;
+  border-radius: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12.5px;
+  color: #0F172A;
+}
+
+/* Tier 2: 3-party sign-off block */
+.ofoot-sign {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border: 1px solid #0F172A;
+  border-radius: 4px;
+  background: #FFFFFF;
+}
+
+.ofoot-sign-col {
+  padding: 6px 10px 8px;
+  min-height: 68px;
+  border-right: 1px solid #64748B;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  text-align: center;
+}
+.ofoot-sign-col:last-child {
+  border-right: 0;
+}
+.ofoot-sign-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0F172A;
+}
+.ofoot-sign-sub {
+  font-size: 11px;
+  font-style: italic;
+  color: #475569;
+  margin-top: 1px;
+}
+.ofoot-sign-space {
+  height: 36px;
+}
+
+.note {
+  font-size: 12px;
+  color: var(--mut);
+  margin: 5px 0;
+}
+
+/* Mandatory Print Rules: A4 Landscape, high-contrast borders, only LỆNH SẢN XUẤT slips */
+@page {
+  size: A4 landscape;
+  margin: 10mm;
+}
+
+@media print {
+  body {
+    background: #FFFFFF !important;
+    color: #0F172A !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .app-header, header, aside, .kpis, .gantt-tooltip, .app-toast,
+  section > .card:not(#printArea),
+  #printArea .row, #printArea .btns, #printArea .note, #printArea > h2 {
+    display: none !important;
+  }
+  main { display: block !important; padding: 0 !important; margin: 0 !important; }
+  #printArea { border: 0 !important; padding: 0 !important; margin: 0 !important; box-shadow: none !important; }
+  .order {
+    border: 1.5px solid #0F172A !important;
+    margin: 0 0 10mm 0 !important;
+    padding: 10px 12px !important;
+    background: #FFFFFF !important;
+    color: #0F172A !important;
+    overflow: visible !important;
+  }
+  .order:last-child { margin-bottom: 0 !important; }
+  .order table { min-width: 0 !important; width: 100% !important; table-layout: fixed !important; }
+  .order table thead { display: table-header-group; }
+  .order table tr, .ofoot-summary, .ofoot-sign {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+  .order table th, .order table td {
+    border-color: #64748B !important;
+    color: #0F172A !important;
+    padding: 5px 5px !important;
+    font-size: 11px !important;
+  }
+  .order table th {
+    border-bottom: 1.5px solid #0F172A !important;
+    background: #F1F5F9 !important;
+  }
+}
+</style>
+<script src="lib/xlsx.full.min.js"></script>
+</head>
+<body>
+<header class="app-header">
+  <div class="brand-bar">
+    <div class="brand-left">
+      <button id="btnToggleSidebar" class="sm" title="Thu gọn / Mở rộng thanh cấu hình Ca & Máy để mở rộng vùng Gantt">☰ Ca &amp; Máy</button>
+      <div>
+        <h1>Hệ thống Điều độ Sản xuất Song song · Gantt &amp; Heijunka</h1>
+        <p class="brand-sub">Cụm máy song song M1–M3 (M4 dự phòng) · 2 dòng FINE / CHISEL · Điều độ Heijunka &amp; SMED · Kiểm soát BTP</p>
+      </div>
+    </div>
+    <div class="tb-group">
+      <span class="badge-src fine" id="badgeSrcF" title="Trạng thái dữ liệu dòng FINE"><i class="dot"></i>FINE: 0 mã (Trống)</span>
+      <span class="badge-src chisel" id="badgeSrcC" title="Trạng thái dữ liệu dòng CHISEL"><i class="dot"></i>CHISEL: 0 mã (Trống)</span>
+    </div>
+  </div>
+
+  <!-- Top Control Bar: compact single-row layout at 1366px (1. Data & Print | 2. View Controls) -->
+  <div class="top-toolbar">
+    <!-- 1. Data & Print -->
+    <div class="tb-group">
+      <span class="tb-label">Dữ liệu &amp; In:</span>
+      <input type="file" id="xlsxIn" accept=".xlsx,.xls,.csv" style="display:none">
+      <button class="fine-btn sm" id="btnImportFine" title="Nạp file Excel/CSV cho dòng FINE (giữ nguyên dữ liệu CHISEL và các ô đã chỉnh tay)">📥 Nạp FINE</button>
+      <button class="chisel-btn sm" id="btnImportChisel" title="Nạp file Excel/CSV cho dòng CHISEL (giữ nguyên dữ liệu FINE và các ô đã chỉnh tay)">📥 Nạp CHISEL</button>
+      <button class="pri sm" id="btnImportXlsx" title="File chỉ có FINE thì chỉ cập nhật FINE và giữ nguyên CHISEL (và ngược lại). File có cả 2 dòng thì cập nhật cả 2.">Nhập Excel / CSV</button>
+      <button class="sm" id="btnTemplate" title="Tải file Excel mẫu đúng định dạng app đọc được: sheet KE_HOACH + sheet HUONG_DAN">File mẫu</button>
+      <button class="sm" id="btnExportXlsx" title="Xuất toàn bộ lịch điều độ 3 sheet ra Excel (.xlsx)">Xuất .xlsx</button>
+      <button class="sm" id="btnExportCsv" title="Xuất lịch chạy máy theo ca ra CSV (.csv)">Xuất .csv</button>
+      <button class="sm" id="btnPrintOrders" title="In phiếu LỆNH SẢN XUẤT trên nền trắng (Ctrl+P)">🖨 In Lệnh SX</button>
+      <button class="sm danger-soft" id="btnClearData" title="Xóa toàn bộ dữ liệu kế hoạch hiện tại (FINE, CHISEL và các ô đã chỉnh tay) để nạp kế hoạch mới">🗑 Xóa dữ liệu</button>
+    </div>
+
+    <!-- 2. View Controls -->
+    <div class="tb-group" style="margin-left:auto">
+      <span class="tb-label">Hiển thị:</span>
+      <div class="btns" id="ganttTabs" style="margin:0">
+        <button class="sm pri" data-gtab="day" title="Xem chi tiết theo ca 1/2/3 và từng giờ trong ngày">Theo Ca / Giờ</button>
+        <button class="sm" data-gtab="all" title="Xem tổng quan toàn đợt sản xuất đa ngày">Toàn đợt (Đa ngày)</button>
+      </div>
+      <button class="sm" id="btnDensity" title="Chuyển đổi mật độ dòng: Gọn (Compact) / Chi tiết (Detailed)">Mật độ: Chuẩn</button>
+    </div>
+  </div>
+</header>
+
+<main>
+<aside class="card sidebar" id="leftSidebar">
+  <h2>Ca &amp; Máy sản xuất</h2>
+  <div class="btns" id="presetBtns">
+    <button class="sm" data-preset="two">3M · 2 ca</button>
+    <button class="sm" data-preset="cur">3M · 3 ca</button>
+    <button class="sm" data-preset="four">4M (Bật M4) · 3 ca</button>
+    <button class="sm" data-preset="ready">Chỉ R+Y</button>
+  </div>
+
+  <h3>Trạng thái cụm máy (M1–M4)</h3>
+  <div id="sidebarMachines" class="mach-cards"></div>
+
+  <label for="machines">Số máy chạy song song (M1–M3 chính; M4 dự phòng)</label>
+  <input type="number" id="machines" min="1" max="4" step="1" value="3">
+  <label for="backupDelayMin" id="lblBackupDelay">Ngưỡng trễ kích hoạt M4 dự phòng (phút)</label>
+  <input type="number" id="backupDelayMin" min="0" step="60" value="480">
+
+  <h3>Ca làm việc trong ngày</h3>
+  <div class="shift"><label class="chk"><input type="checkbox" id="on1" checked>Ca 1 (06:00–14:00)</label><input type="number" id="h1" step="0.25" min="0" max="8" value="7.5"></div>
+  <div class="shift"><label class="chk"><input type="checkbox" id="on2" checked>Ca 2 (14:00–22:00)</label><input type="number" id="h2" step="0.25" min="0" max="8" value="7.5"></div>
+  <div class="shift"><label class="chk"><input type="checkbox" id="on3">Ca 3 Đêm (22:00–06:00)</label><input type="number" id="h3" step="0.25" min="0" max="8" value="7.25"></div>
+
+  <h3>Lịch, BTP &amp; Ưu tiên</h3>
+  <label for="start">Ngày bắt đầu lịch</label>
+  <input type="date" id="start" value="">
+  <label class="chk"><input type="checkbox" id="skipSun" checked>Nghỉ Chủ nhật (06:00 CN → 06:00 T2 · Ca 3 T7 chạy tới 06:00 CN)</label>
+  <label class="chk"><input type="checkbox" id="campaign" checked>Chiến dịch FINE trước, CHISEL sau</label>
+  <label class="chk"><input type="checkbox" id="onlyReady">Chỉ xếp lịch mã đang chạy / đủ BTP (R + Y)</label>
+  <label class="chk" id="lblAllowPullW" title="Chỉ kéo sớm mã W dùng giả định chờ mặc định; không kéo các mã đã ghi Ngày đủ BTP cố định"><input type="checkbox" id="allowPullW">Cho phép kéo sớm mã chờ BTP (W) khi máy rảnh</label>
+  <label for="waitDays" id="lblWaitDays">Mã chờ BTP (W) chạy sau (ngày làm việc)</label>
+  <input type="number" id="waitDays" min="0" step="1" value="3">
+  <label for="sortMode">Thứ tự ưu tiên xếp mã</label>
+  <select id="sortMode">
+    <option value="hue">Vòng tròn màu Heijunka (nhạt → đậm)</option>
+    <option value="qty">Số lượng lớn trước</option>
+    <option value="stt">Theo STT mã</option>
+  </select>
+  <label class="chk" title="Khi bật: xếp theo Cấp ưu tiên (1→2→3) và Hạn giao PO sớm nhất trước, rồi mới áp dụng Thứ tự ưu tiên xếp mã ở trên">
+    <input type="checkbox" id="prioritizeUrgent">
+    <span>Ưu tiên đơn gấp &amp; Hạn PO trước</span>
+  </label>
+
+  <details class="smed">
+    <summary>Năng suất &amp; Đổi mã (SMED)</summary>
+    <label for="rate">Định mức năng suất (PC/giờ/máy)</label>
+    <input type="number" id="rate" step="10" min="60" value="2000">
+    <label for="coMode">Chế độ tính đổi màu</label>
+    <select id="coMode">
+      <option value="sop">Chuẩn SOP (phẳng theo phút)</option>
+      <option value="heijunka">Tối ưu Heijunka theo vòng tròn màu</option>
+    </select>
+    <label for="co">Đổi màu SOP / khác nhóm kề (phút)</label>
+    <input type="number" id="co" step="1" min="0" value="15">
+    <label for="coSame" id="lblCoSame">Cùng nhóm màu nhạt→đậm (phút)</label>
+    <input type="number" id="coSame" step="1" min="0" value="9">
+    <label for="cuGroup" id="lblCuGroup">Cộng thêm nhóm xa / đậm→nhạt (phút)</label>
+    <input type="number" id="cuGroup" step="1" min="0" value="10">
+    <label for="cuSwitch">Đổi dòng FINE ↔ CHISEL (phút)</label>
+    <input type="number" id="cuSwitch" step="1" min="0" value="60">
+  </details>
+  <p class="note">Lô chuyển giao tối thiểu mặc định: 5,000 PC/lần. Công suất ngày tự tính theo Số máy × Giờ ca × Định mức.</p>
+</aside>
+
+<section>
+  <div class="kpis" id="kpis"></div>
+
+  <div class="card">
+    <div class="g-head">
+      <h2 style="margin:0">Biểu đồ điều độ Gantt theo Máy &amp; Ca</h2>
+      <span class="note" style="margin:0">Cuộn ngang/dọc giữ cố định cột máy &amp; thước giờ · Click cột ngày ở chế độ Toàn đợt để phóng to ca</span>
+    </div>
+    <div id="shiftWarnBanner" class="shift-warn-banner" style="display:none"></div>
+    <div id="dayPills" class="day-pills"></div>
+    <div class="gantt-viewport">
+      <div id="gantt" class="gantt-inner"></div>
+    </div>
+    <div class="legend" id="legend"></div>
+    <div id="dailyTracker" class="tracker"></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="sku-head-bar">
+      <h2 style="margin:0" id="skuTitle">Bảng điều độ &amp; Tiến độ từng mã</h2>
+      <div class="sku-search-group">
+        <input type="text" id="skuSearch" placeholder="Tìm Mã chạy / SAP / Hạn PO..." style="width:200px;padding:4px 8px;font-size:12px">
+        <select id="topFamFilter" style="width:auto;padding:4px 6px;font-size:12px" title="Lọc theo dòng ngòi bút">
+          <option value="all">Dòng: Tất cả</option>
+          <option value="F">Dòng: FINE</option>
+          <option value="C">Dòng: CHISEL</option>
+        </select>
+        <select id="topStFilter" style="width:auto;padding:4px 6px;font-size:12px" title="Lọc theo cảnh báo PO & trạng thái BTP">
+          <option value="all">Trạng thái: Tất cả</option>
+          <option value="ry">▶+✓ Chỉ R + Y (Sẵn sàng)</option>
+          <option value="R">▶ Đang chạy (R)</option>
+          <option value="Y">✓ Đủ BTP (Y)</option>
+          <option value="W">⏳ Chờ BTP (W)</option>
+          <option value="small">📦 Lô nhỏ (&lt; 5,000 PC)</option>
+          <option value="late">🚨 Trễ PO (Late PO)</option>
+          <option value="risk">⚠ Nguy cơ PO (At Risk)</option>
+        </select>
+      </div>
+    </div>
+    <div class="btns" id="skuFilters" style="margin:0 0 6px">
+      <button class="sm pri" data-f="all">Tất cả</button>
+      <button class="sm" data-f="ry">Chỉ R+Y</button>
+      <button class="sm" data-f="R">Đang chạy (R)</button>
+      <button class="sm" data-f="Y">Đủ BTP (Y)</button>
+      <button class="sm" data-f="W">Chờ BTP (W)</button>
+      <button class="sm" data-f="F">FINE</button>
+      <button class="sm" data-f="C">CHISEL</button>
+      <button class="sm" data-f="small" title="Các mã có SL cần SX nhỏ hơn lô chuyển giao tối thiểu (5,000 PC)">Lô nhỏ (&lt; 5,000)</button>
+      <button class="sm" data-f="late">Trễ PO</button>
+      <button class="sm" data-f="risk">Nguy cơ PO</button>
+    </div>
+    <p class="note" id="dataInfo"></p>
+    <div class="purge-bar" id="smallLotBar">
+      <label class="purge-field" for="smallLotThreshold">
+        <span>Xóa mã có SL &lt;</span>
+        <input type="number" id="smallLotThreshold" min="1" step="100" value="1000" title="Ngưỡng số lượng (PC): xóa các mã có SL cần SX nhỏ hơn giá trị này">
+        <span>PC</span>
+      </label>
+      <div class="btns" id="smallLotPresets" style="margin:0">
+        <button type="button" class="sm pri" data-sl-preset="1000">1.000</button>
+        <button type="button" class="sm" data-sl-preset="2000">2.000</button>
+        <button type="button" class="sm" data-sl-preset="5000" title="Mức lô chuyển giao tối thiểu mặc định (5,000 PC)">5.000</button>
+      </div>
+      <label class="chk" title="Tránh xóa nhầm các mã đang chạy dở trên máy (trạng thái R)">
+        <input type="checkbox" id="keepRunningOnPurge" checked>
+        <span>Giữ lại mã đang chạy (R)</span>
+      </label>
+      <label class="chk" title="Khi bật, chỉ xét các mã đang hiển thị theo bộ lọc / ô tìm kiếm ở bảng dưới">
+        <input type="checkbox" id="purgeFilteredOnly">
+        <span>Chỉ trong bộ lọc hiện tại</span>
+      </label>
+      <span class="purge-preview" id="smallLotPreview"></span>
+      <div class="btns" style="margin:0 0 0 auto">
+        <button type="button" class="sm danger-soft" id="btnPurgeSmallLots" disabled>🗑 Xóa mã SL ít</button>
+        <button type="button" class="sm" id="btnUndoDelete" disabled title="Khôi phục lại thao tác xóa gần nhất">↩ Hoàn tác xóa</button>
+      </div>
+    </div>
+    <div class="scroll"><table id="skus"></table></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2>So sánh kịch bản điều độ</h2>
+    <div class="row">
+      <input type="text" id="scName" value="Kịch bản A" placeholder="Tên kịch bản">
+      <button class="pri" id="saveRun">Thêm vào so sánh</button>
+      <button id="clearRuns">Xóa hết</button>
+    </div>
+    <div class="scroll" style="max-height:220px"><table id="cmp"></table></div>
+  </div>
+
+  <div class="card" id="printArea" style="margin-top:14px">
+    <h2>Lệnh sản xuất theo ngày (Phiếu in xưởng)</h2>
+    <div class="row">
+      <select id="dayPick" style="max-width:220px"></select>
+      <button id="copyTxt">Sao chép văn bản</button>
+      <button class="pri" id="btnPrintSlip">🖨 In phiếu Lệnh sản xuất (Ctrl+P)</button>
+    </div>
+    <p class="note">Khi nhấn Ctrl+P hoặc nút In phiếu, hệ thống chỉ xuất các bảng LỆNH SẢN XUẤT trên nền trắng sạch.</p>
+    <div id="orders"></div>
+  </div>
+</section>
+</main>
+
+<div id="ganttTooltip" class="gantt-tooltip"></div>
+<div id="appToast" class="app-toast" role="status" aria-live="polite"></div>
+
+<script src="data.js"></script>
+<script src="engine.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>
