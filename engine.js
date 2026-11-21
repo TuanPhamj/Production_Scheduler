@@ -128,9 +128,16 @@ function buildColorLookup(){
 
 const COLOR_LOOKUP = buildColorLookup();
 
+// Ngưỡng độ đậm đo trên bảng Tổng màu (217 màu, 21/11/2026): độ đậm 0–3 = rất nhạt (L* ≥ 75),
+// ≥ 14 = đậm (L* TB 41–50). Độ đậm 13 còn sáng gần bằng 11–12 (L* TB 63) nên không tính là đậm.
+const TONE_VERY_LIGHT_MAX = 3;
+const TONE_DARK_MIN = 14;
+
 /**
  * Phân tích mã màu thành nhóm vòng tròn màu và thứ tự nhạt → đậm.
- * Giả định độ đậm nhạt theo chữ số đầu sau tiền tố, rồi tới phần số còn lại.
+ * Cấu trúc mã theo bảng Tổng màu: [tiền tố][1 chữ số dãy màu][số độ đậm 0–16], vd R014 = dãy 0, độ đậm 14;
+ * YR112 = dãy 1, độ đậm 12; G36 = dãy 3, độ đậm 6. Số độ đậm càng lớn màu càng đậm
+ * (đo màu đầu bút trên bảng, 217 mã: tương quan 0,60–0,96 trong từng nhóm, chữ số đầu chỉ 0,04). Chữ số dãy chỉ dùng phá đồng hạng.
  */
 function parseColor(code){
   const raw = String(code || '').trim().toUpperCase();
@@ -150,25 +157,34 @@ function parseColor(code){
   if (!matched){
     return {
       prefix: '', groupIdx: 99, groupId: 'unknown', orderInGroup: 99,
-      firstDigit: 5, restNum: 0, toneScore: 5000,
+      series: 5, tone: 8, toneScore: 805,
       hue: -1, isDark: false, isVeryLight: false, rank: 9999999
     };
   }
-  const rest = raw.slice(matched.prefix.length).replace(/\D/g, '');
-  const firstDigit = matched.prefix === '0' ? 0 : (matched.prefix === '120' ? 9 : (rest.length ? parseInt(rest[0], 10) : 0));
-  const restNum = rest.length > 1 ? parseInt(rest.slice(1), 10) : 0;
-  const toneScore = firstDigit * 1000 + restNum;
+  const digits = raw.slice(matched.prefix.length).replace(/\D/g, '');
+  let series = 0, tone = 0;
+  if (matched.prefix === '0'){
+    tone = 0;                                  // bút pha màu (Blender) - rất nhạt
+  } else if (matched.prefix === '120'){
+    tone = 16;                                 // đen - đậm nhất
+  } else if (digits.length >= 2){
+    series = parseInt(digits[0], 10);
+    tone = parseInt(digits.slice(1), 10);
+  } else if (digits.length === 1){
+    tone = parseInt(digits, 10);               // mã ngắn (1 chữ số): coi chữ số đó là độ đậm
+  }
+  const toneScore = tone * 100 + series;
   const hue = Object.prototype.hasOwnProperty.call(HUE, matched.prefix) ? HUE[matched.prefix] : -1;
-  const isDark = matched.prefix === '120' || firstDigit >= 6;
-  const isVeryLight = matched.prefix === '0' || firstDigit === 0;
+  const isDark = matched.prefix === '120' || tone >= TONE_DARK_MIN;
+  const isVeryLight = matched.prefix === '0' || tone <= TONE_VERY_LIGHT_MAX;
   const rank = matched.groupIdx * 1000000 + matched.orderInGroup * 10000 + toneScore;
   return {
     prefix: matched.prefix,
     groupIdx: matched.groupIdx,
     groupId: matched.groupId,
     orderInGroup: matched.orderInGroup,
-    firstDigit,
-    restNum,
+    series,
+    tone,
     toneScore,
     hue,
     isDark,
@@ -206,7 +222,7 @@ function calcChangeover(prev, next, P){
   }
 
   // Chuyển từ màu đậm/đen sang màu nhạt hoặc 0-Blender: phải súc rửa kỹ
-  if (a.isDark && (b.isVeryLight || b.firstDigit <= 1)){
+  if (a.isDark && b.isVeryLight){
     return { min: farCo, isTrans: true, isSwitch: false };
   }
   // Cùng nhóm màu
@@ -272,9 +288,9 @@ function compareBySortMode(a, b, machine, P){
 }
 
 function compareJobs(a, b, machine, P){
-  // Cấp 1: dòng bút FINE trước, CHISEL sau (khi bật campaign)
-  if (P.campaign && a.fam !== b.fam){
-    return a.fam === 'F' ? -1 : 1;
+  // Cấp 1: mã thuộc file kế hoạch tải lên trước chạy trước (khi bật campaign)
+  if (P.campaign && a.fileSeq !== b.fileSeq){
+    return a.fileSeq - b.fileSeq;
   }
 
   // Cấp 2: trạng thái sẵn sàng R -> Y -> W (trong nhóm W ưu tiên mã có BTP sẵn sàng sớm hơn)
@@ -348,6 +364,8 @@ function simulate(P){
     const btpDate = parseIsoDate(meta.btp_ready_date);
     const dueDate = parseIsoDate(meta.due_date);
     const fixedMachine = (meta.fixedMachine >= 1 && meta.fixedMachine <= P.machines) ? Number(meta.fixedMachine) : null;
+    // Thứ tự file kế hoạch đã tải lên của dòng bút (P.famOrder do ui.js cấp). Không có -> FINE (1) trước CHISEL (2)
+    const famSeq = P.famOrder && Number.isFinite(Number(P.famOrder[fam])) ? Number(P.famOrder[fam]) : (fam === 'C' ? 2 : 1);
     const sttRaw = meta.stt;
     const stt = (sttRaw !== null && sttRaw !== undefined && sttRaw !== '' && Number.isFinite(Number(sttRaw)) && Number(sttRaw) >= 0)
       ? Math.round(Number(sttRaw))
@@ -393,6 +411,7 @@ function simulate(P){
       dueIso: meta.due_date || '',
       dueDateStr: dueDate ? fmtDate(dueDate) : '',
       fixedMachine,
+      fileSeq: famSeq,
       stt,
       sttCustom: Boolean(meta.sttCustom),
       excluded,
@@ -469,7 +488,7 @@ function simulate(P){
   const addIdle = (mach, from, to, kind, reason) => {
     if (to - from > 1e-6) idles.push({ m: mach.id, s: from, e: Math.min(to, maxHorizon), kind, reason });
   };
-  // Máy đang ở dòng FINE chỉ chờ FINE kế tiếp (thay vì đổi sang CHISEL) nếu thời gian chờ ≤ 2 lần đổi dòng
+  // Máy đang chạy mã của file trước chỉ chờ mã kế tiếp của file đó (thay vì đổi dòng) nếu thời gian chờ ≤ 2 lần đổi dòng
   const switchWait = 2 * Math.max(0, Number(P.cuSwitch) || 0);
   const fits = (j, x) => !j.fixedMachine || j.fixedMachine === x.id;
 
@@ -481,17 +500,20 @@ function simulate(P){
     if (!m) break;
     const poolForM = remaining.filter(j => fits(j, m));
 
-    // Cuốn chiếu FINE trước: chỉ ưu tiên FINE trong số mã CHẠY ĐƯỢC NGAY.
-    // Không còn FINE chạy được thì chạy CHISEL đã sẵn sàng thay vì để máy nằm chờ.
+    // Chạy theo thứ tự file tải lên: chỉ ưu tiên mã của file tải lên SỚM NHẤT trong số mã CHẠY ĐƯỢC NGAY.
+    // Mã của file trước chưa chạy được (chờ BTP) thì chạy mã đã sẵn sàng của file sau thay vì để máy nằm chờ.
     const pickReady = () => {
       const ready = poolForM.filter(j => j.readyCum <= m.clock);
       if (P.campaign && ready.length){
-        const readyF = ready.filter(j => j.fam === 'F');
-        if (readyF.length) return { ready: readyF };
-        const nextF = poolForM.filter(j => j.fam === 'F').sort((a, b) => a.readyCum - b.readyCum)[0];
-        if (nextF && m.lastJob && m.lastJob.fam === 'F' && nextF.readyCum < maxHorizon && nextF.readyCum - m.clock <= switchWait){
-          return { ready: [], waitFor: nextF };
+        const firstSeq = Math.min(...ready.map(j => j.fileSeq));
+        const readyFirst = ready.filter(j => j.fileSeq === firstSeq);
+        // Máy đang chạy mã của file trước: chỉ chờ mã kế tiếp của file đó nếu sẵn sàng trong ≤ 2 lần đổi dòng
+        const nextEarlier = poolForM.filter(j => j.fileSeq < firstSeq).sort((a, b) => a.readyCum - b.readyCum)[0];
+        if (nextEarlier && m.lastJob && m.lastJob.fileSeq === nextEarlier.fileSeq && m.lastJob.fam !== readyFirst[0].fam &&
+            nextEarlier.readyCum < maxHorizon && nextEarlier.readyCum - m.clock <= switchWait){
+          return { ready: [], waitFor: nextEarlier };
         }
+        return { ready: readyFirst };
       }
       return { ready };
     };
@@ -501,7 +523,10 @@ function simulate(P){
     if (!pick.ready.length && !pick.waitFor && P.allowPullW){
       // Mặc định KHÔNG kéo sớm mã W (tôn trọng ngày đủ BTP). Chỉ chọn DUY NHẤT 1 mã ứng viên khi bật P.allowPullW.
       let pullable = poolForM.filter(j => !j.btpCustom && j.readyCum > m.clock);
-      if (P.campaign && pullable.some(j => j.fam === 'F')) pullable = pullable.filter(j => j.fam === 'F');
+      if (P.campaign && pullable.length){
+        const firstSeq = Math.min(...pullable.map(j => j.fileSeq));
+        pullable = pullable.filter(j => j.fileSeq === firstSeq);
+      }
       if (pullable.length){
         const minReady = Math.min(...pullable.map(j => j.readyCum));
         const tied = pullable.filter(j => j.readyCum === minReady);
@@ -522,7 +547,8 @@ function simulate(P){
       }
       if (pick.waitFor){
         addIdle(m, m.clock, target, 'campaign',
-          'Chờ mã FINE ' + nextJob.code + ' sẵn sàng (' + slotLabelAt(target) + ') để tránh đổi dòng FINE↔CHISEL 2 lần');
+          'Chờ mã ' + (nextJob.fam === 'C' ? 'CHISEL ' : 'FINE ') + nextJob.code + ' (file tải lên trước) sẵn sàng (' +
+          slotLabelAt(target) + ') để tránh đổi dòng FINE↔CHISEL 2 lần');
       } else if (nextJob.readyCum >= maxHorizon){
         addIdle(m, m.clock, target, 'none', 'Không còn mã nào chạy được trong ' + P.maxDays + ' ngày lịch (chờ BTP)');
       } else {

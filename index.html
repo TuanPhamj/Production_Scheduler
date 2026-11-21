@@ -1519,9 +1519,7 @@ tr:hover td {
       <button class="fine-btn sm" id="btnImportFine" title="Nạp file Excel/CSV cho dòng FINE (giữ nguyên dữ liệu CHISEL và các ô đã chỉnh tay)">📥 Nạp FINE</button>
       <button class="chisel-btn sm" id="btnImportChisel" title="Nạp file Excel/CSV cho dòng CHISEL (giữ nguyên dữ liệu FINE và các ô đã chỉnh tay)">📥 Nạp CHISEL</button>
       <button class="pri sm" id="btnImportXlsx" title="File chỉ có FINE thì chỉ cập nhật FINE và giữ nguyên CHISEL (và ngược lại). File có cả 2 dòng thì cập nhật cả 2.">Nhập Excel / CSV</button>
-      <button class="sm" id="btnTemplate" title="Tải file Excel mẫu đúng định dạng app đọc được: sheet KE_HOACH + sheet HUONG_DAN">File mẫu</button>
       <button class="sm" id="btnExportXlsx" title="Xuất toàn bộ lịch điều độ 3 sheet ra Excel (.xlsx)">Xuất .xlsx</button>
-      <button class="sm" id="btnExportCsv" title="Xuất lịch chạy máy theo ca ra CSV (.csv)">Xuất .csv</button>
       <button class="sm" id="btnPrintOrders" title="In phiếu LỆNH SẢN XUẤT trên nền trắng (Ctrl+P)">🖨 In Lệnh SX</button>
       <button class="sm danger-soft" id="btnClearData" title="Xóa toàn bộ dữ liệu kế hoạch hiện tại (FINE, CHISEL và các ô đã chỉnh tay) để nạp kế hoạch mới">🗑 Xóa dữ liệu</button>
     </div>
@@ -1565,7 +1563,7 @@ tr:hover td {
   <label for="start">Ngày bắt đầu lịch</label>
   <input type="date" id="start" value="">
   <label class="chk"><input type="checkbox" id="skipSun" checked>Nghỉ Chủ nhật (06:00 CN → 06:00 T2 · Ca 3 T7 chạy tới 06:00 CN)</label>
-  <label class="chk"><input type="checkbox" id="campaign" checked>Chiến dịch FINE trước, CHISEL sau</label>
+  <label class="chk" title="Dòng bút có file kế hoạch tải lên trước sẽ chạy trước; tải lại file của dòng nào thì dòng đó xếp sau cùng"><input type="checkbox" id="campaign" checked>Chạy theo thứ tự file tải lên (file trước chạy trước)</label>
   <label class="chk"><input type="checkbox" id="onlyReady">Chỉ xếp lịch mã đang chạy / đủ BTP (R + Y)</label>
   <label class="chk" id="lblAllowPullW" title="Chỉ kéo sớm mã W dùng giả định chờ mặc định; không kéo các mã đã ghi Ngày đủ BTP cố định"><input type="checkbox" id="allowPullW">Cho phép kéo sớm mã chờ BTP (W) khi máy rảnh</label>
   <label for="waitDays" id="lblWaitDays">Mã chờ BTP (W) chạy sau (ngày làm việc)</label>
@@ -1584,7 +1582,7 @@ tr:hover td {
   <details class="smed">
     <summary>Năng suất &amp; Đổi mã (SMED)</summary>
     <label for="rate">Định mức năng suất (PC/giờ/máy)</label>
-    <input type="number" id="rate" step="10" min="60" value="2000">
+    <input type="number" id="rate" step="10" min="60" value="3360">
     <label for="coMode">Chế độ tính đổi màu</label>
     <select id="coMode">
       <option value="sop">Chuẩn SOP (phẳng theo phút)</option>
