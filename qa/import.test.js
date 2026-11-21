@@ -73,10 +73,11 @@ const stCases = [
   ['W', '', 1, 'W', 'QUAN TRỌNG: W nhưng đã SX 1 PC'],
   ['Đủ BTP', '', 500, 'R', 'Đủ BTP và đã SX 500 PC → đang chạy dở'],
   ['', '', 500, 'R', 'Trống trạng thái, đã SX 500 PC → đang chạy dở'],
+  ['2. Đang chạy', 'Chờ BTP', 500, 'W', 'Cột cảnh báo ghi "2. Đang chạy" nhưng cột trạng thái ghi "Chờ BTP" → W thắng'],
 ];
 for (const [a, b, done, exp, desc] of stCases){
-  t('C3 ' + JSON.stringify(a) + (done ? ' + đã SX ' + done : ''), desc, exp, () => {
-    const r = call('inferStatusAndDelay(__A[0], __A[1], __A[2])', [a, a || b, done]);
+  t('C3 ' + JSON.stringify(a) + (b ? ' + ' + JSON.stringify(b) : '') + (done ? ' + đã SX ' + done : ''), desc, exp, () => {
+    const r = call('inferStatusAndDelay(__A[0], __A[1], __A[2])', [a, b || a, done]);
     return { actual: r.st + (r.known ? '' : ' (không nhận ra)'), pass: r.st === exp };
   });
 }
@@ -236,6 +237,18 @@ t('C13b', 'File không tiêu đề nhưng đúng thứ tự cột mẫu, có mã
 t('C14', 'Workbook có sheet "LR BÚT FINE" theo dạng file điều độ', 'Báo rõ sheet không có cột "SL còn phải lắp"', () => {
   const ws = XLSX.utils.aoa_to_sheet([OTHER_HEAD.split(',')].concat(OTHER_ROWS.map(r => r.split(','))));
   ctx.__WS = ws;
+  const p = vm.runInContext('parsePlanSheet(__WS, "F", {}, "2026-11-23")', ctx);
+  ctx.__IS = p.issues;
+  const s = vm.runInContext('summarizeIssues([__IS])', ctx);
+  return { actual: `${p.list.length} mã; ${s.warn.join(' | ')}`, pass: p.list.length === 0 && s.warn.some(w => w.includes('LR BÚT FINE')) };
+});
+t('C14b', 'Sheet "LR BÚT FINE" thiếu cột "SL còn phải lắp" nhưng cột J (index 9) có số dương', 'Từ chối, không đọc nhầm cột J', () => {
+  const rows10 = [
+    ['STT', 'Mã sản phẩm', 'Mã SAP', 'Tên', 'C4', 'C5', 'C6', 'C7', 'C8', 'Số khác'],
+    [], [],
+    [1, 'B02', 'S1', 'Bút 1', 0, 0, 0, 0, 0, 12000]
+  ];
+  ctx.__WS = XLSX.utils.aoa_to_sheet(rows10);
   const p = vm.runInContext('parsePlanSheet(__WS, "F", {}, "2026-11-23")', ctx);
   ctx.__IS = p.issues;
   const s = vm.runInContext('summarizeIssues([__IS])', ctx);

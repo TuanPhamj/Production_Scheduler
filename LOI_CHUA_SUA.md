@@ -17,9 +17,8 @@ Mức lỗi:
 | L11 | P2 | SL thực tế nhập ở ô theo dõi **không trừ** vào SL còn lại | Bấm chạy lại không làm lịch thay đổi theo sản lượng đã làm | Cập nhật cột "SL còn phải lắp" trong file rồi nạp lại | `ui.js` → `renderDailyTracker` |
 | L12 | P2 | Chưa có lịch nghỉ lễ / Tết, chỉ nghỉ Chủ nhật | Lịch vẫn xếp việc vào ngày lễ | Tuần có ngày lễ thì tắt ca hoặc đổi ngày bắt đầu | `engine.js` → `buildSlots` |
 | L13 | P2 | Dữ liệu lưu trên trình duyệt chỉ cần hỏng 1 dòng là bị **xóa toàn bộ**, không có bản sao | Mất kế hoạch và SL thực tế nhập tay | Cuối ngày bấm "Xuất .xlsx" để sao lưu | `ui.js` → `loadStoredData` |
-| L14 | P3 | Engine vẫn tính đổi màu cho mã có SL = 0 | Hiện chưa xảy ra được (khi nhập file, dòng SL = 0 đã bị bỏ) | Không cần | `engine.js` → `simulate` |
 | L15 | P3 | KPI "Hiệu suất máy" và "Giờ máy rảnh" bị kéo lệch khi có mã chờ BTP xa | KPI dễ hiểu nhầm (hiệu suất thấp bất thường) | Xem Gantt để biết máy rảnh vì sao | `engine.js` → `simulate` (`availMin`) |
-| L16 | P3 | Tải nặng thì sau 480 phút M4 nhận việc như một máy chính | Cần planner xác nhận có đúng ý muốn không | Không bật M4 nếu không dùng | `engine.js` → `simulate` (`backupDelay`) |
+| L16 | P3 | Tải nặng thì sau 480 phút M4 nhận việc như một máy chính (khi không chỉ định `machineOrder`) | Khi người dùng tự chọn M4 trên giao diện thì M4 chạy ngay từ đầu theo thứ tự đã chọn | Không chọn M4 nếu không dùng | `engine.js` → `simulate` |
 
 ## Hạn chế đã biết (chưa làm)
 

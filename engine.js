@@ -438,7 +438,7 @@ function simulate(P){
     };
   });
 
-  const incl = jobs.filter(j => !j.excluded);
+  const incl = jobs.filter(j => !j.excluded && j.rem0 > 0);
   const need = incl.reduce((s, j) => s + j.rem0, 0);
 
   if (!slots.length || !incl.length || P.rate <= 0 || !activeMachineIds.length){

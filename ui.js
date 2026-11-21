@@ -1505,11 +1505,8 @@ function isInvalidCodeCell(code){
 function inferStatusAndDelay(stTxt, btpTxt, doneQty){
   const a = normTxt(stTxt), b = normTxt(btpTxt);
   const full = (a + ' ' + b).trim();
-  if (/^R$|\bR\b|2\.\s*DANG CHAY|DANG CHAY/.test(a) || /^2\./.test(a)){
-    return { st: 'R', delay: 0, hasExplicitDelay: false, known: true, fromDone: false };
-  }
-  // Ghi rõ chờ BTP (W / Chờ BTP / Thiếu / 4A-4C) luôn thắng "đã SX > 0": mã chạy dở nhưng hết BTP vẫn phải chờ
-  if (/^W$|\bW\b|4\.\s*CHO|CHO DONG BO|CHO BTP|4[A-C]\.|^THIEU/.test(full) || /^4\b/.test(a)){
+  // Ghi rõ chờ BTP (W / Chờ BTP / Thiếu / 4A-4C) luôn thắng "Đang chạy" và "đã SX > 0": mã chạy dở nhưng hết BTP vẫn phải chờ
+  if (/^W$|\bW\b|4\.\s*CHO|CHO DONG BO|CHO BTP|4[A-C]\.|^THIEU|\bTHIEU BTP\b/.test(full) || /^4\b/.test(a)){
     let delay = 0, hasExplicitDelay = false;
     if (/4A\.|CHO RUT/.test(b)){ delay = 1; hasExplicitDelay = true; }
     else if (/4B\.|4C\.|CHO IN|CHO DONG NAP/.test(b)){ delay = 2; hasExplicitDelay = true; }
@@ -1517,6 +1514,9 @@ function inferStatusAndDelay(stTxt, btpTxt, doneQty){
     else if (/TAY|NAP|IR/.test(b)){ delay = 2; hasExplicitDelay = true; }
     else if (/MUC|NGOI/.test(b)){ delay = 1; hasExplicitDelay = true; }
     return { st: 'W', delay, hasExplicitDelay, known: true };
+  }
+  if (/^R$|\bR\b|2\.\s*DANG CHAY|DANG CHAY/.test(a) || /^2\./.test(a)){
+    return { st: 'R', delay: 0, hasExplicitDelay: false, known: true, fromDone: false };
   }
   // Đã lắp được một phần và không ghi chờ BTP -> đang chạy dở
   if (doneQty > 0){
@@ -1632,15 +1632,19 @@ function parsePlanSheet(ws, fam, btpMap, startIso){
   if (!ws) return { list: acc.list, metas: acc.metas, has: { due: false, fix: false, stt: false }, issues: acc.issues };
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
   const colStt = findColByHeader(rows, 2, ['=STT', 'STT MA', 'STT (0', 'SO THU TU'], 0);
-  const colRem = findColByHeader(rows, 2, ['SL CON PHAI LAP', 'CON PHAI LAP', 'CON LAI'], 9);
+  const colRem = findColByHeader(rows, 2, ['SL CON PHAI LAP', 'CON PHAI LAP', 'CON LAI'], -1);
   const colDue = findColByHeader(rows, 2, ['DUE DATE', 'NGAY GIAO', 'HAN PO'], -1);
   const colAlert = findColByHeader(rows, 2, ['CANH BAO TIEN DO', 'HANH DONG UU TIEN'], -1);
   const colSt = findColByHeader(rows, 2, ['=TRANG THAI', '=STATUS', 'TRANG THAI VAT TU', 'TRANG THAI', 'STATUS'], -1);
   const colDone = findColByHeader(rows, 2, ['LUY KE DA SX', 'SL DA LAP', 'DA LAP', 'DA SX'], -1);
   const colPriNum = findColByHeader(rows, 2, ['THU TU UU TIEN', 'CAP UU TIEN'], -1);
-  const remHdrFound = findColByHeader(rows, 2, ['SL CON PHAI LAP', 'CON PHAI LAP', 'CON LAI'], -1) >= 0;
   // has: file có cột nào (cột không có -> giữ thông tin đã nhập trong app khi gộp)
   const has = { due: colDue >= 0, fix: false, stt: colStt >= 0 };
+  // Sheet tên LR BÚT FINE/CHISEL nhưng không có tiêu đề "SL còn phải lắp" -> từ chối ngay, không đọc nhầm cột J
+  if (colRem < 0){
+    acc.issues.layout.push('Sheet ' + (fam === 'C' ? 'LR BÚT CHISEL' : 'LR BÚT FINE') + ' không có cột "SL còn phải lắp" ở dòng tiêu đề (3 dòng đầu) — không đọc được');
+    return { list: acc.list, metas: acc.metas, has, issues: acc.issues };
+  }
   let seqStt = 0;
   for (let r = 3; r < rows.length; r++){
     const row = rows[r] || [];
@@ -1687,11 +1691,6 @@ function parsePlanSheet(ws, fam, btpMap, startIso){
     if (colDue >= 0) checkDateCell(acc, row[colDue], dueIso, 'Hạn PO', ws, r);
     addPlanRow(acc, [code, sap || code, rem, pri, fam, st],
       { stt, sttCustom: false, btp_ready_date: btpDate, btp_delay: btpDelay, btp_custom: false, due_date: dueIso, fixedMachine: null });
-  }
-  // Sheet tên LR BÚT FINE/CHISEL nhưng khác bố cục (vd file điều độ dạng STT | Mã sản phẩm | Sản lượng cần sản xuất):
-  // không đọc được mã nào và không có tiêu đề "SL còn phải lắp" -> báo rõ thay vì lỗi chung chung
-  if (!acc.list.length && !remHdrFound){
-    acc.issues.layout.push('Sheet ' + (fam === 'C' ? 'LR BÚT CHISEL' : 'LR BÚT FINE') + ' không có cột "SL còn phải lắp" ở dòng tiêu đề (3 dòng đầu) — không đọc được');
   }
   return { list: acc.list, metas: acc.metas, has, issues: acc.issues };
 }
