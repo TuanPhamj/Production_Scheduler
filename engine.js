@@ -355,6 +355,14 @@ function simulate(P){
   const srcSkus = Array.isArray(P.skus) ? P.skus : SKUS;
   const metaMap = P.metaMap || (typeof SKU_META === 'object' && SKU_META ? SKU_META : {});
 
+  // Danh sách máy hoạt động theo đúng thứ tự người dùng chọn (máy chọn trước = ưu tiên chạy trước).
+  // Nếu không truyền P.machineOrder -> tương thích ngược theo P.machines (1..P.machines).
+  const hasCustomOrder = Array.isArray(P.machineOrder);
+  const activeMachineIds = hasCustomOrder
+    ? P.machineOrder.map(Number).filter((id, idx, arr) => Number.isFinite(id) && id >= 1 && id <= 4 && arr.indexOf(id) === idx)
+    : Array.from({ length: Math.max(0, Math.min(4, Math.round(Number(P.machines) || 0))) }, (_, i) => i + 1);
+  const activeMachineSet = new Set(activeMachineIds);
+
   const jobs = srcSkus.map((row, idx) => {
     const [code, sap, rawRem, rawPri, fam, st] = row;
     const rem0 = Math.max(0, Number(rawRem) || 0);
@@ -363,7 +371,8 @@ function simulate(P){
     const meta = metaMap[key] || metaMap[code] || {};
     const btpDate = parseIsoDate(meta.btp_ready_date);
     const dueDate = parseIsoDate(meta.due_date);
-    const fixedMachine = (meta.fixedMachine >= 1 && meta.fixedMachine <= P.machines) ? Number(meta.fixedMachine) : null;
+    const rawFix = Number(meta.fixedMachine);
+    const fixedMachine = (rawFix >= 1 && rawFix <= 4 && activeMachineSet.has(rawFix)) ? rawFix : null;
     // Thứ tự file kế hoạch đã tải lên của dòng bút (P.famOrder do ui.js cấp). Không có -> FINE (1) trước CHISEL (2)
     const famSeq = P.famOrder && Number.isFinite(Number(P.famOrder[fam])) ? Number(P.famOrder[fam]) : (fam === 'C' ? 2 : 1);
     const sttRaw = meta.stt;
@@ -432,18 +441,19 @@ function simulate(P){
   const incl = jobs.filter(j => !j.excluded);
   const need = incl.reduce((s, j) => s + j.rem0, 0);
 
-  if (!slots.length || !incl.length || P.rate <= 0){
-    // Vẫn đánh giá rủi ro/trễ hạn PO khi tất cả các ca đang tắt hoặc mã bị loại khỏi lịch
+  if (!slots.length || !incl.length || P.rate <= 0 || !activeMachineIds.length){
+    // Vẫn đánh giá rủi ro/trễ hạn PO khi tất cả các ca/máy đang tắt hoặc mã bị loại khỏi lịch
     markPoRisks(jobs, slots, P.start);
     const lateCount = jobs.filter(j => j.isLate || j.poRisk).length;
     return {
-      P, ok: incl.length === 0, lastJ: null, need, doneTot: 0,
+      P, machineOrder: activeMachineIds.slice(), ok: incl.length === 0, lastJ: null, need, doneTot: 0,
       incl, fin: [], coH: 0, trans: 0, fSw: 0, util: 0, idleH: 0, lateCount,
       horizon: 0, slots, segs: [], idles: [], queue: incl, jobs, orders: {}
     };
   }
 
-  // Máy dự phòng (M4 theo DTM_SPECS.backupMachines) chỉ kích hoạt khi các máy chính vượt ngưỡng P.backupDelayMin phút
+  // Khi người dùng chủ động chọn máy qua P.machineOrder (kể cả M4), máy được chọn chạy ngay từ đầu theo đúng thứ tự chọn.
+  // Chế độ cũ (không truyền P.machineOrder): M4 giữ độ trễ dự phòng P.backupDelayMin.
   const backupIds = new Set(
     ((typeof DTM_SPECS !== 'undefined' && Array.isArray(DTM_SPECS.backupMachines)) ? DTM_SPECS.backupMachines : ['M4'])
       .map(s => parseInt(String(s).replace(/\D/g, ''), 10))
@@ -451,11 +461,11 @@ function simulate(P){
   );
   const backupDelay = Math.max(0, Number(P.backupDelayMin) || 0);
 
-  const machines = Array.from({ length: P.machines }, (_, i) => {
-    const id = i + 1;
-    const isBackup = backupIds.has(id);
+  const machines = activeMachineIds.map((id, orderIdx) => {
+    const isBackup = !hasCustomOrder && backupIds.has(id);
     return {
       id,
+      order: orderIdx,
       isBackup,
       activated: !isBackup,
       activatedAt: 0,
@@ -493,7 +503,8 @@ function simulate(P){
   const fits = (j, x) => !j.fixedMachine || j.fixedMachine === x.id;
 
   while (remaining.length > 0){
-    machines.sort((a, b) => a.clock - b.clock || a.id - b.id);
+    // Máy rảnh sớm nhất chạy trước; nếu cùng thời điểm rảnh thì máy được chọn trước (order nhỏ hơn) chạy trước
+    machines.sort((a, b) => a.clock - b.clock || a.order - b.order || a.id - b.id);
 
     // Máy rảnh sớm nhất còn mã có thể làm (máy không còn mã phù hợp giữ nguyên clock, không bị loại vĩnh viễn)
     const m = machines.find(x => x.clock < maxHorizon && remaining.some(j => fits(j, x)));
@@ -743,6 +754,7 @@ function simulate(P){
 
   return {
     P,
+    machineOrder: activeMachineIds.slice(),
     ok: fin.length === incl.length && Math.abs(doneTot - need) < 1e-3,
     lastJ,
     need,

@@ -24,11 +24,29 @@ let lastImportError = '';
 let saveStorageWarned = false;
 // File mới nhất đã nạp cho từng dòng bút: { F: { file, at }, C: { file, at } }
 let DATA_SRC = {};
+// Danh sách máy được chọn theo thứ tự ưu tiên (máy chọn trước = chạy trước: #1 -> #2 -> #3 -> #4)
+let SELECTED_MACHINES = [1, 2, 3];
 // Gợi ý dòng bút khi người dùng bấm nút "Nạp FINE" hoặc "Nạp CHISEL" riêng biệt
 let pendingImportFam = null;
 // Snapshot tạm để hoàn tác thao tác xóa mã gần nhất (chỉ giữ trong phiên làm việc)
 let DELETE_UNDO = null;
 let toastTimer = null;
+
+function normalizeMachineOrder(arr){
+  if (!Array.isArray(arr)) return [1, 2, 3];
+  const out = [];
+  for (const x of arr){
+    const id = Math.round(Number(x));
+    if (id >= 1 && id <= 4 && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
+function getActiveMachines(R){
+  if (R && Array.isArray(R.machineOrder)) return R.machineOrder;
+  if (R && R.P && Array.isArray(R.P.machineOrder)) return R.P.machineOrder;
+  return SELECTED_MACHINES.slice();
+}
 
 // Bản đồ trạng thái gốc (nếu có) để nhận diện ô Trạng thái được chỉnh tay
 const DEFAULT_ST_MAP = new Map(SKUS.map(r => [r[4] + ':' + r[0], r[5]]));
@@ -88,9 +106,11 @@ const SIDEBAR_SEL_IDS = ['sortMode', 'coMode'];
 function saveUiPrefs(){
   try {
     const prefs = {};
+    if ($('machines')) $('machines').value = String(SELECTED_MACHINES.length);
     SIDEBAR_NUM_IDS.forEach(id => { if ($(id)) prefs[id] = $(id).value; });
     SIDEBAR_CHK_IDS.forEach(id => { if ($(id)) prefs[id] = Boolean($(id).checked); });
     SIDEBAR_SEL_IDS.forEach(id => { if ($(id)) prefs[id] = $(id).value; });
+    prefs.machineOrder = SELECTED_MACHINES.slice();
     if ($('start') && /^\d{4}-\d{2}-\d{2}$/.test($('start').value)) prefs.start = $('start').value;
     prefs.v = UI_PREF_VER;
     localStorage.setItem(UI_PREF_KEY, JSON.stringify(prefs));
@@ -112,6 +132,13 @@ function loadUiPrefs(){
         $(id).value = prefs[id];
       }
     });
+    if (Array.isArray(prefs.machineOrder)){
+      SELECTED_MACHINES = normalizeMachineOrder(prefs.machineOrder);
+    } else if (prefs.machines !== undefined){
+      const n = Math.max(1, Math.min(4, Math.round(parseFloat(prefs.machines)) || 3));
+      SELECTED_MACHINES = Array.from({ length: n }, (_, i) => i + 1);
+    }
+    if ($('machines')) $('machines').value = String(SELECTED_MACHINES.length);
     SIDEBAR_CHK_IDS.forEach(id => {
       if ($(id) && typeof prefs[id] === 'boolean') $(id).checked = prefs[id];
     });
@@ -253,8 +280,8 @@ function clampSidebarInputs(){
     if (max !== null && v > max) v = max;
     el.value = String(v);
   };
-  clampNum('machines', 1, 4, 3, true);
-  clampNum('backupDelayMin', 0, null, 480, true);
+  if ($('machines')) $('machines').value = String(SELECTED_MACHINES.length);
+  clampNum('backupDelayMin', 0, null, 0, true);
   clampNum('h1', 0, 8, 7.5, false);
   clampNum('h2', 0, 8, 7.5, false);
   clampNum('h3', 0, 8, 7.25, false);
@@ -275,7 +302,7 @@ function setCtrlDisabled(elId, lblId, disabled){
 
 function syncControlStates(R){
   const onlyReady = Boolean($('onlyReady') && $('onlyReady').checked);
-  const machines = Math.round(parseFloat($('machines') ? $('machines').value : 3)) || 3;
+  const machines = SELECTED_MACHINES.length;
   const isSop = ($('coMode') ? $('coMode').value : 'sop') !== 'heijunka';
 
   // Khóa các ô không có tác dụng trong cấu hình hiện tại
@@ -284,6 +311,7 @@ function syncControlStates(R){
   setCtrlDisabled('backupDelayMin', 'lblBackupDelay', machines < 4);
   setCtrlDisabled('coSame', 'lblCoSame', isSop);
   setCtrlDisabled('cuGroup', 'lblCuGroup', isSop);
+  if ($('btnClearMachines')) $('btnClearMachines').disabled = machines === 0;
   [1, 2, 3].forEach(i => {
     const on = Boolean($('on' + i) && $('on' + i).checked);
     setCtrlDisabled('h' + i, null, !on);
@@ -302,7 +330,7 @@ function syncControlStates(R){
   }
 
   // Khóa nút Xóa dữ liệu khi danh sách đang trống; khóa In / Sao chép / Xuất khi không có dữ liệu lập lịch hoạt động
-  const hasActiveJobs = Boolean(R && R.incl && R.incl.length > 0 && R.slots && R.slots.length > 0);
+  const hasActiveJobs = Boolean(R && R.incl && R.incl.length > 0 && R.slots && R.slots.length > 0 && getActiveMachines(R).length > 0);
   const hasDayOrders = Boolean(R && selectedDay && Object.values(R.orders || {}).some(o => o.slot.ds === selectedDay));
   if ($('btnClearData')) $('btnClearData').disabled = WORK_SKUS.length === 0;
   if ($('btnExportXlsx')) $('btnExportXlsx').disabled = !hasActiveJobs;
@@ -322,8 +350,9 @@ function readParams(){
   const startD = new Date((rawStart || defaultStartIso()) + 'T00:00:00');
   const start = Number.isNaN(startD.getTime()) ? new Date(defaultStartIso() + 'T00:00:00') : startD;
   return {
-    machines: Math.max(1, Math.min(4, Math.round(num('machines')) || 1)),
-    backupDelayMin: Math.max(0, num('backupDelayMin')),
+    machines: SELECTED_MACHINES.length,
+    machineOrder: SELECTED_MACHINES.slice(),
+    backupDelayMin: 0,
     // Mỗi ca nằm trong khung 8 giờ -> giới hạn 0..8h
     shifts: [1, 2, 3].map(i => ({name: 'Ca ' + i, on: $('on' + i).checked, h: Math.min(8, Math.max(0, num('h' + i)))})),
     rate: rawRate > 0 ? Math.max(60, rawRate) : defaultRate,
@@ -392,36 +421,63 @@ function renderSourceBadges(){
   }
 }
 
+function toggleMachineSelection(mi){
+  const id = Math.round(Number(mi));
+  if (!(id >= 1 && id <= 4)) return;
+  const idx = SELECTED_MACHINES.indexOf(id);
+  if (idx >= 0){
+    SELECTED_MACHINES.splice(idx, 1);
+  } else {
+    SELECTED_MACHINES.push(id);
+  }
+  if ($('machines')) $('machines').value = String(SELECTED_MACHINES.length);
+  saveUiPrefs();
+  run();
+}
+
+function clearMachineSelection(){
+  SELECTED_MACHINES = [];
+  if ($('machines')) $('machines').value = '0';
+  saveUiPrefs();
+  run();
+}
+
 function renderSidebarMachines(R){
   const el = $('sidebarMachines');
   if (!el || !R) return;
+  const activeMachs = getActiveMachines(R);
+  const hintEl = $('machOrderHint');
+  if (hintEl){
+    if (activeMachs.length > 0){
+      hintEl.innerHTML = 'Thứ tự chạy: <b>' + activeMachs.map((m, idx) => '#' + (idx + 1) + ' M' + m).join(' → ') + '</b>';
+    } else {
+      hintEl.innerHTML = '<span style="color:var(--danger);font-weight:600">Chưa chọn máy — bấm thẻ M1–M4 theo thứ tự máy muốn chạy trước (#1 → #2...).</span>';
+    }
+  }
   const maxClock = R.segs.reduce((mx, g) => Math.max(mx, g.e), 0) || 1;
   let html = '';
   for (let mi = 1; mi <= 4; mi++){
-    const enabled = mi <= R.P.machines;
-    const isBackup = mi === 4;
+    const orderIdx = activeMachs.indexOf(mi);
+    const enabled = orderIdx >= 0;
+    const rank = orderIdx + 1;
     const mSegs = R.segs.filter(g => g.m === mi);
     const runMin = mSegs.filter(g => g.type === 'run').reduce((s, g) => s + (g.e - g.s), 0);
     const coMin = mSegs.filter(g => g.type === 'co').reduce((s, g) => s + (g.e - g.s), 0);
     const pcs = Math.round(mSegs.filter(g => g.type === 'run').reduce((s, g) => s + g.pcs, 0));
     const utilPct = enabled && maxClock > 0 ? Math.min(100, Math.round((runMin / maxClock) * 100)) : 0;
 
-    let badge = '';
-    if (!enabled){
-      badge = '<span class="m-badge stby">Dự phòng (Tắt)</span>';
-    } else if (isBackup){
-      badge = pcs > 0
-        ? '<span class="m-badge act-bkp">DP · Kích hoạt</span>'
-        : '<span class="m-badge stby">DP · Chờ tải</span>';
-    } else {
-      badge = '<span class="m-badge pri">Máy chính</span>';
-    }
+    const badge = enabled
+      ? '<span class="m-badge pri">Ưu tiên #' + rank + '</span>'
+      : '<span class="m-badge stby">Tắt · Bấm chọn</span>';
+    const titleTip = enabled
+      ? ('Máy M' + mi + ' đang BẬT ở vị trí Ưu tiên #' + rank + ' — bấm để tắt máy này')
+      : ('Máy M' + mi + ' đang TẮT — bấm để bật và xếp làm Ưu tiên #' + (activeMachs.length + 1));
 
-    html += '<div class="mach-card ' + (enabled && pcs > 0 ? 'active' : 'standby') + '">' +
-      '<div class="mach-card-hd"><span>M' + mi + '</span>' + badge + '</div>' +
+    html += '<div class="mach-card ' + (enabled ? 'selected active' : 'standby') + '" data-mach-id="' + mi + '" title="' + esc(titleTip) + '">' +
+      '<div class="mach-card-hd"><span>' + (enabled ? '<span class="m-rank">#' + rank + '</span>' : '') + 'M' + mi + '</span>' + badge + '</div>' +
       '<div style="display:flex;justify-content:space-between;color:var(--mut)"><span>Tải: <b style="color:var(--ink)">' + utilPct + '%</b></span><span>' + N(pcs) + ' PC</span></div>' +
       '<div class="mach-bar"><div class="mach-fill" style="width:' + utilPct + '%"></div></div>' +
-      '<div style="font-size:10.5px;color:var(--mut)">Chạy: ' + (runMin / 60).toFixed(1) + 'h · Đổi: ' + Math.round(coMin) + 'p</div>' +
+      '<div style="font-size:10.5px;color:var(--mut)">' + (enabled ? ('Chạy: ' + (runMin / 60).toFixed(1) + 'h · Đổi: ' + Math.round(coMin) + 'p') : ('Bấm để chọn (#' + (activeMachs.length + 1) + ')')) + '</div>' +
       '</div>';
   }
   el.innerHTML = html;
@@ -429,16 +485,19 @@ function renderSidebarMachines(R){
 
 function renderKpis(R){
   const P = R.P;
+  const activeMachs = getActiveMachines(R);
+  const mCount = activeMachs.length;
   const sumH = P.shifts.reduce((s, sh) => s + (sh.on ? sh.h : 0), 0);
   const hasJobs = R.jobs && R.jobs.length > 0;
   const finish = !hasJobs ? '–' : (R.ok && R.lastJ ? R.lastJ.end.ds : 'Chưa xong');
   const finSub = !hasJobs ? 'chưa có dữ liệu kế hoạch' : (R.ok && R.lastJ ? 'ngày thứ ' + (R.lastJ.endDay + 1) + ' của lịch' : 'còn ' + N(R.need - R.doneTot) + ' PC');
+  const machDesc = (mCount ? activeMachs.map(m => 'M' + m).join('→') : '0 máy') + ' × ' + sumH + ' giờ';
   // Thẻ "Khả năng hoàn thành bộ túi" đã gỡ (21/11/2026): app không có số tồn kho nên không kết luận được đủ bộ
   const cards = [
     ['Cần sản xuất', N(R.need) + ' PC', R.incl.length + ' mã đưa vào mô phỏng'],
     ['Làm được trong mô phỏng', N(R.doneTot) + ' PC', R.fin.length + ' / ' + R.incl.length + ' mã hoàn thành'],
     ['Ngày xong toàn bộ', finish, finSub],
-    ['Công suất danh định/ngày', N(P.machines * sumH * P.rate) + ' PC', P.machines + ' máy × ' + sumH + ' giờ'],
+    ['Công suất danh định/ngày', N(mCount * sumH * P.rate) + ' PC', machDesc],
     ['Giờ đổi màu', R.coH.toFixed(1) + ' h', R.trans + ' lần đổi · ' + R.fSw + ' lần FINE↔CHISEL'],
     ['Hiệu suất máy', (R.util * 100).toFixed(1) + '%', 'tỷ lệ giờ máy thực sự sản xuất'],
     ['Giờ máy rảnh', R.idleH.toFixed(1) + ' h', 'thường do chờ BTP'],
@@ -472,9 +531,10 @@ function fmtMinOfDay(min){
 function renderDailyTracker(R, day){
   const el = $('dailyTracker');
   if (!el) return;
-  if (!day || !R || !R.jobs || !R.jobs.length || !R.slots.length){ el.innerHTML = ''; return; }
+  const activeMachs = getActiveMachines(R);
+  if (!day || !R || !R.jobs || !R.jobs.length || !R.slots.length || !activeMachs.length){ el.innerHTML = ''; return; }
   let cards = '', totPlan = 0, totAct = 0;
-  for (let mi = 1; mi <= R.P.machines; mi++){
+  activeMachs.forEach((mi, orderIdx) => {
     const plan = Math.round(R.segs.filter(g => g.ds === day && g.m === mi && g.type === 'run').reduce((s, g) => s + g.pcs, 0));
     const key = day + ':M' + mi;
     const act = Math.max(0, Math.round(numVal(ACTUAL_PROD[key] ?? 0)));
@@ -484,7 +544,7 @@ function renderDailyTracker(R, day){
     const pct = plan > 0 ? Math.min(100, Math.round((act / plan) * 100)) : (act > 0 ? 100 : 0);
     const diff = act - plan;
     const diffStr = (diff >= 0 ? '+' : '') + N(diff) + ' PC';
-    const mLabel = mi === 4 ? 'M4 (dự phòng)' : 'M' + mi;
+    const mLabel = 'M' + mi + ' (#' + (orderIdx + 1) + ')';
     cards += '<div class="trk-card' + (isManual ? ' manual-override' : '') + '">' +
       '<div class="row" style="justify-content:space-between"><b>' + mLabel + ' · KH: ' + N(plan) + ' PC</b><span>Đạt: <b>' + pct + '%</b> (' + diffStr + ')</span></div>' +
       '<div class="trk-bar"><div class="trk-fill" style="width:' + pct + '%"></div></div>' +
@@ -494,7 +554,7 @@ function renderDailyTracker(R, day){
         (isManual ? 'Đang dùng số nhập tay (được giữ nguyên khi nạp lại file).' : 'Nhập số lượng thực tế ca làm việc để theo dõi đạt kế hoạch.') + '">' +
       '<button class="sm" data-trk-fill="' + esc(key) + '" data-plan="' + plan + '">= KH</button>' +
       '</div></div>';
-  }
+  });
   const totPct = totPlan > 0 ? Math.round((totAct / totPlan) * 100) : 0;
   const totDiff = totAct - totPlan;
   el.innerHTML = '<div class="row" style="justify-content:space-between">' +
@@ -522,9 +582,14 @@ function buildRichTooltipHtml(g, job, slotShift, slotTime, durMin){
 
 function renderGantt(R){
   const warnEl = $('shiftWarnBanner');
+  const activeMachs = getActiveMachines(R);
+  const noMachines = !activeMachs.length;
   const noShifts = !R.slots || !R.slots.length;
   if (warnEl){
-    if (noShifts){
+    if (noMachines){
+      warnEl.style.display = 'block';
+      warnEl.textContent = '⚠ Chưa chọn máy sản xuất nào (M1–M4 đều đang tắt) — hãy bấm chọn ít nhất 1 máy ở thanh cấu hình bên trái theo thứ tự ưu tiên muốn chạy (#1 → #2...).';
+    } else if (noShifts){
       warnEl.style.display = 'block';
       warnEl.textContent = '⚠ Chưa bật ca làm việc nào (Ca 1 / Ca 2 / Ca 3 đều đang tắt hoặc 0 giờ) — hệ thống không thể lập lịch chạy máy. Hãy bật ít nhất 1 ca ở thanh cấu hình bên trái.';
     } else {
@@ -566,9 +631,11 @@ function renderGantt(R){
   }
 
   if (!days.length){
-    const emptyMsg = noShifts
-      ? 'Chưa có ca làm việc nào được bật.'
-      : ((!R.jobs || !R.jobs.length) ? EMPTY_DATA_NOTE : 'Chưa có mã nào được phân bổ vào lịch.');
+    const emptyMsg = noMachines
+      ? 'Chưa có máy sản xuất nào được chọn. Hãy bấm chọn máy M1–M4 ở thanh bên trái.'
+      : (noShifts
+        ? 'Chưa có ca làm việc nào được bật.'
+        : ((!R.jobs || !R.jobs.length) ? EMPTY_DATA_NOTE : 'Chưa có mã nào được phân bổ vào lịch.'));
     $('gantt').innerHTML = '<div style="padding:18px;text-align:center" class="note">' + esc(emptyMsg) + '</div>';
     $('legend').innerHTML = '';
     renderDailyTracker(R, '');
@@ -616,7 +683,7 @@ function renderGantt(R){
       '<div class="axis-row"><div class="axis-corner">Mốc giờ (' + esc(firstStartStr) + ')</div><div class="axis">' + ticks + '</div></div></div>';
 
     let lanes = '';
-    for (let mi = 1; mi <= R.P.machines; mi++){
+    activeMachs.forEach((mi, orderIdx) => {
       let bars = hrGrid;
       const mPlan = Math.round(R.segs.filter(g => g.ds === selectedDay && g.m === mi && g.type === 'run').reduce((s, g) => s + g.pcs, 0));
       let dayIdleMin = 0;
@@ -667,11 +734,11 @@ function renderGantt(R){
             (relW >= 7.5 ? '<span class="seg-lbl">' + lbl + '</span>' : '') + '</div>';
         }
       });
-      const mLabel = '<span>' + (mi === 4 ? 'M4 (Dự phòng)' : 'Máy M' + mi) + '</span>' +
+      const mLabel = '<span>Máy M' + mi + ' (#' + (orderIdx + 1) + ')</span>' +
         '<span style="font-size:11px;color:var(--mut);font-weight:500">' + N(mPlan) + ' PC</span>' +
         (dayIdleMin >= 1 ? '<span class="idle-txt">Rảnh ' + (dayIdleMin / 60).toFixed(1) + 'h</span>' : '');
       lanes += '<div class="lane"><div class="lane-hdr">' + mLabel + '</div><div class="track intraday">' + bars + '</div></div>';
-    }
+    });
 
     $('gantt').innerHTML = stickyTop + lanes;
     $('legend').innerHTML =
@@ -710,7 +777,7 @@ function renderGantt(R){
     '<div class="axis-row"><div class="axis-corner">Ngày (' + esc(firstStartAll) + ')</div><div class="axis">' + axis + '</div></div></div>';
 
   let lanes = '';
-  for (let mi = 1; mi <= R.P.machines; mi++){
+  activeMachs.forEach((mi, orderIdx) => {
     let bars = '';
     for (const g of R.segs){
       if (g.m !== mi) continue;
@@ -737,9 +804,9 @@ function renderGantt(R){
         '<div><b>Nguyên nhân:</b> ' + esc(idl.reason) + '</div>';
       bars += '<div class="seg idle" style="left:' + (s / H * 100).toFixed(3) + '%;width:' + ((e - s) / H * 100).toFixed(3) + '%" title="' + esc('Máy rảnh · ' + idl.reason) + '" data-tt="' + esc(richIdle) + '"></div>';
     }
-    const mLabel = mi === 4 ? 'M4 (Dự phòng)' : 'Máy M' + mi;
+    const mLabel = 'Máy M' + mi + ' (#' + (orderIdx + 1) + ')';
     lanes += '<div class="lane"><div class="lane-hdr">' + mLabel + '</div><div class="track">' + bars + sunHatches + dayCols + '</div></div>';
-  }
+  });
 
   $('gantt').innerHTML = stickyTopAll + lanes;
   $('legend').innerHTML =
@@ -970,13 +1037,16 @@ function renderSkus(R){
   $('skuTitle').textContent = (order.length !== allOrder.length)
     ? 'Bảng điều độ & Tiến độ từng mã (lọc ' + order.length + '/' + allOrder.length + ' mã · ' + N(shownPcs) + '/' + N(totPcs) + ' PC)'
     : 'Bảng điều độ & Tiến độ từng mã (' + R.jobs.length + ' mã · ' + N(totPcs) + ' PC)';
-  // Mã gắn máy đang tắt (vd gắn M3 khi chỉ bật 2 máy) -> engine bỏ ràng buộc; báo để planner biết
+  // Mã gắn máy đang tắt (vd gắn M3 khi chưa chọn M3) -> engine bỏ ràng buộc; báo để planner biết
+  const activeMachs = getActiveMachines(R);
+  const activeSet = new Set(activeMachs);
   const fixOff = WORK_SKUS.filter(r => {
     const fm = WORK_META[r[4] + ':' + r[0]] && Number(WORK_META[r[4] + ':' + r[0]].fixedMachine);
-    return fm > R.P.machines;
+    return fm >= 1 && !activeSet.has(fm);
   }).map(r => r[0] + '→M' + WORK_META[r[4] + ':' + r[0]].fixedMachine);
+  const activeDesc = activeMachs.length ? ('chỉ bật ' + activeMachs.map(m => 'M' + m).join(', ')) : 'chưa bật máy nào';
   $('dataInfo').textContent = dataNote + (fixOff.length
-    ? ' ⚠ ' + fixOff.length + ' mã gắn máy đang tắt (chỉ bật ' + R.P.machines + ' máy) nên được xếp máy khác: ' + fixOff.slice(0, 6).join(', ') + (fixOff.length > 6 ? ', …' : '') + '.'
+    ? ' ⚠ ' + fixOff.length + ' mã gắn máy đang tắt (' + activeDesc + ') nên được xếp máy khác: ' + fixOff.slice(0, 6).join(', ') + (fixOff.length > 6 ? ', …' : '') + '.'
     : '');
   const head = '<thead><tr><th>#</th><th>Mã chạy</th><th>Mã SAP</th><th class="n">STT mã</th><th class="n">SL cần SX</th><th class="n">Còn thiếu</th><th>Trạng thái BTP</th><th>Ngày đủ BTP</th><th class="n">UT</th><th>Dòng</th><th>Hạn PO</th><th>Gắn máy</th><th class="n">Máy</th><th>Bắt đầu</th><th>Hoàn thành</th><th>Cảnh báo PO</th><th class="c" style="width:46px">Xóa</th></tr></thead>';
   const rows = order.map((j, i) => {
@@ -998,8 +1068,8 @@ function renderSkus(R){
     const savedFix = (WORK_META[key] && WORK_META[key].fixedMachine) ? Number(WORK_META[key].fixedMachine) : null;
     const fmSel = '<select class="cell-in' + (savedFix ? ' is-edited' : '') + '" data-act="fix" data-key="' + esc(key) + '">' +
       '<option value="">Tự động</option>' +
-      [1, 2, 3].map(m => {
-        const inactive = m > R.P.machines;
+      [1, 2, 3, 4].map(m => {
+        const inactive = !activeSet.has(m);
         return '<option value="' + m + '"' + (savedFix === m ? ' selected' : '') + (inactive && savedFix !== m ? ' disabled' : '') + '>M' + m + (inactive ? ' (đang tắt)' : '') + '</option>';
       }).join('') +
       '</select>';
@@ -1023,7 +1093,7 @@ function renderSkus(R){
 
 function renderRuns(){
   const head = '<thead><tr><th>Kịch bản</th><th class="n">Máy</th><th>Giờ các ca</th><th>Xong toàn bộ</th><th class="n">Đã làm (PC)</th><th class="n">Còn thiếu (PC)</th><th class="n">Giờ đổi màu</th><th class="n">Hiệu suất</th><th class="n">Giờ rảnh</th><th></th></tr></thead>';
-  const rows = RUNS.map((r, i) => '<tr><td>' + esc(r.name) + '</td><td class="n">' + r.machines + '</td><td>' + r.hours +
+  const rows = RUNS.map((r, i) => '<tr><td>' + esc(r.name) + '</td><td class="n">' + esc(r.machines) + '</td><td>' + r.hours +
     '</td><td>' + r.finish + '</td><td class="n">' + N(r.done) + '</td><td class="n">' + N(r.left) + '</td><td class="n">' + r.coH +
     '</td><td class="n">' + r.util + '</td><td class="n">' + r.idleH + '</td><td><button class="sm" data-del="' + i + '">Xóa</button></td></tr>').join('');
   $('cmp').innerHTML = head + '<tbody>' + (rows || '<tr><td colspan="10" class="note">Chưa có kịch bản. Chỉnh tham số rồi bấm “Thêm vào so sánh”.</td></tr>') + '</tbody>';
@@ -1032,10 +1102,11 @@ function renderRuns(){
 function saveRun(){
   const R = lastRes;
   if (!R) return;
+  const activeMachs = getActiveMachines(R);
   const finish = (!R.jobs || !R.jobs.length) ? '–' : (R.ok && R.lastJ ? R.lastJ.end.ds : 'Chưa xong');
   RUNS.push({
     name: $('scName').value.trim() || 'Kịch bản ' + (RUNS.length + 1),
-    machines: R.P.machines,
+    machines: activeMachs.length ? activeMachs.map(m => 'M' + m).join('→') : '0',
     hours: R.P.shifts.filter(s => s.on).map(s => s.h).join(' + ') || '–',
     finish,
     done: R.doneTot,
@@ -1114,7 +1185,9 @@ function fmtOrderDocMeta(o, L){
   const hasF = L.some(x => x.fam === 'F');
   const hasC = L.some(x => x.fam === 'C');
   const lineName = (hasF && hasC) ? 'Chuyền FINE + CHISEL' : (hasC ? 'Chuyền CHISEL' : 'Chuyền FINE');
-  const mLabel = 'M' + o.m + (o.m === 4 ? ' - Dự phòng' : '');
+  const activeMachs = getActiveMachines(lastRes);
+  const rIdx = activeMachs.indexOf(o.m);
+  const mLabel = 'M' + o.m + (rIdx >= 0 ? ' (#' + (rIdx + 1) + ')' : '');
   const dowLong = DOW_LONG[o.slot.dow] || o.slot.dow;
 
   const defaultRate = (typeof DTM_SPECS !== 'undefined' && DTM_SPECS.ratePerHour) ? DTM_SPECS.ratePerHour : 3360;
@@ -1228,13 +1301,20 @@ function renderOrders(R){
   if (days.includes(cur)) sel.value = cur;
   const day = sel.value || days[0] || '';
   selectedDay = day;
+  const activeMachs = getActiveMachines(R);
+  const machRank = m => {
+    const idx = activeMachs.indexOf(m);
+    return idx >= 0 ? idx : 99 + m;
+  };
   const list = Object.values(R.orders)
     .filter(o => o.slot.ds === day && Object.keys(o.lines || {}).length > 0)
-    .sort((a, b) => a.slot.idx - b.slot.idx || a.m - b.m);
+    .sort((a, b) => a.slot.idx - b.slot.idx || machRank(a.m) - machRank(b.m) || a.m - b.m);
   if (!list.length){
-    const msg = (!R.slots || !R.slots.length)
-      ? 'Chưa bật ca làm việc nào (Ca 1/2/3 đều tắt) nên không có lệnh sản xuất.'
-      : ((!R.jobs || !R.jobs.length) ? EMPTY_DATA_NOTE : 'Không có lệnh cho ngày này.');
+    const msg = !activeMachs.length
+      ? 'Chưa chọn máy sản xuất nào (M1–M4 đều tắt) nên không có lệnh sản xuất.'
+      : ((!R.slots || !R.slots.length)
+        ? 'Chưa bật ca làm việc nào (Ca 1/2/3 đều tắt) nên không có lệnh sản xuất.'
+        : ((!R.jobs || !R.jobs.length) ? EMPTY_DATA_NOTE : 'Không có lệnh cho ngày này.'));
     $('orders').innerHTML = '<p class="note">' + esc(msg) + '</p>';
     lastTxt = '';
     return;
@@ -1287,7 +1367,13 @@ const PRE = {
 function applyPreset(k){
   const p = PRE[k];
   if (!p) return;
-  $('machines').value = p.m;
+  // Giữ thứ tự ưu tiên các máy đang được chọn, đồng thời bổ sung hoặc cắt cho đủ p.m máy
+  const nextMachs = SELECTED_MACHINES.slice(0, p.m);
+  for (let m = 1; m <= 4 && nextMachs.length < p.m; m++){
+    if (!nextMachs.includes(m)) nextMachs.push(m);
+  }
+  SELECTED_MACHINES = nextMachs;
+  if ($('machines')) $('machines').value = String(SELECTED_MACHINES.length);
   [1, 2, 3].forEach(i => { $('on' + i).checked = !!p.on[i - 1]; });
   $('onlyReady').checked = p.ready;
   // Đồng bộ bộ lọc bảng SKU với nút preset "Chỉ R+Y"
@@ -2007,8 +2093,13 @@ function importExcelFile(file, forcedFam){
 
 function buildScheduleWorkbook(R){
   const wb = XLSX.utils.book_new();
+  const activeMachs = getActiveMachines(R);
+  const machRank = m => {
+    const idx = activeMachs.indexOf(m);
+    return idx >= 0 ? idx : 99 + m;
+  };
   const sheet1 = [['Ngày', 'Thứ', 'Ca', 'Khung giờ ca', 'Khung giờ dự kiến', 'Máy', 'STT', 'Mã chạy', 'Mã SAP', 'Dòng', 'SL mục tiêu ca (PC)', 'Thời gian (h)', 'Đổi màu (phút)', 'Ưu tiên', 'Trạng thái', 'Nghiệm thu & Bàn giao']];
-  Object.values(R.orders).sort((a, b) => a.slot.idx - b.slot.idx || a.m - b.m).forEach(o => {
+  Object.values(R.orders).sort((a, b) => a.slot.idx - b.slot.idx || machRank(a.m) - machRank(b.m) || a.m - b.m).forEach(o => {
     Object.values(o.lines).forEach((ln, idx) => {
       const fam = ln.fam === 'C' ? 'CHISEL' : 'FINE';
       sheet1.push([o.slot.ds, o.slot.dow, o.slot.shift, o.slot.time, ln.timeWin || o.slot.time, 'M' + o.m, idx + 1, ln.code, ln.sap, fam, Math.round(ln.pcs), Number((ln.min / 60).toFixed(2)), Math.round(ln.coMin || 0), ln.pri, STAT[ln.st], fmtShiftHandover(ln, o.slot.ds, o.slot.idx)]);
@@ -2114,6 +2205,16 @@ function init(){
   window.addEventListener('resize', syncHeaderHeight);
 
   document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => applyPreset(b.dataset.preset)));
+  if ($('sidebarMachines')){
+    $('sidebarMachines').addEventListener('click', e => {
+      const card = e.target.closest('[data-mach-id]');
+      if (!card) return;
+      toggleMachineSelection(card.dataset.machId);
+    });
+  }
+  if ($('btnClearMachines')){
+    $('btnClearMachines').addEventListener('click', clearMachineSelection);
+  }
   const sidebarEl = document.querySelector('aside');
   sidebarEl.addEventListener('input', () => {
     syncControlStates(lastRes);

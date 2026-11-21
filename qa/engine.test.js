@@ -199,6 +199,33 @@ t('B2.6b', '4 máy, tải nặng (8 mã × 450 ph)', 'M4 có việc, bắt đầ
     return { actual: `M4: ${m4.length} segment, bắt đầu cum ${m4.length ? Math.min(...m4.map(g => g.s)) : '-'}`,
       pass: m4.length > 0 && Math.min(...m4.map(g => g.s)) >= 480 };
   });
+t('B2.6c', 'Tự chọn máy theo thứ tự M3 → M1 (machineOrder: [3, 1]), tắt M2 & M4', 'M3 (#1) nhận mã đầu, M1 (#2) nhận mã thứ 2; M2 & M4 không chạy',
+  () => {
+    const R = E.simulate(mkP({ sortMode: 'stt', machineOrder: [3, 1],
+      skus: [sku('B02', 5000), sku('G02', 5000)],
+      metaMap: { 'F:B02': { stt: 0 }, 'F:G02': { stt: 1 } } }));
+    const j1 = R.jobs.find(x => x.code === 'B02');
+    const j2 = R.jobs.find(x => x.code === 'G02');
+    const usedM = [...new Set(R.segs.map(g => g.m))];
+    return { actual: `B02→M${j1.owner}, G02→M${j2.owner}, máy chạy: ${usedM.join(',')}`,
+      pass: j1.owner === 3 && j2.owner === 1 && usedM.every(m => m === 3 || m === 1) };
+  });
+t('B2.6d', 'Tự chọn M4 trước rồi mới tới M2 (machineOrder: [4, 2])', 'M4 chạy ngay từ đầu (cum = 0) với ưu tiên #1, M2 ưu tiên #2',
+  () => {
+    const R = E.simulate(mkP({ sortMode: 'stt', machineOrder: [4, 2],
+      skus: [sku('B02', 5000), sku('G02', 5000)],
+      metaMap: { 'F:B02': { stt: 0 }, 'F:G02': { stt: 1 } } }));
+    const j1 = R.jobs.find(x => x.code === 'B02');
+    const j2 = R.jobs.find(x => x.code === 'G02');
+    const m4Start = R.segs.filter(g => g.m === 4)[0];
+    return { actual: `B02→M${j1.owner} (s=${m4Start ? m4Start.s : '-'}), G02→M${j2.owner}`,
+      pass: j1.owner === 4 && m4Start && m4Start.s === 0 && j2.owner === 2 };
+  });
+t('B2.6e', 'Bỏ chọn toàn bộ máy (machineOrder: [])', 'Không lỗi, không xếp segment nào, ok = false',
+  () => {
+    const R = E.simulate(mkP({ machineOrder: [], skus: [sku('B02', 5000)] }));
+    return { actual: `segs ${R.segs.length}, ok ${R.ok}`, pass: R.segs.length === 0 && R.ok === false };
+  });
 
 // ---------- B2.7 Máy cố định ----------
 t('B2.7a', 'Mã gắn M2 (3 máy)', 'Chỉ chạy M2',
@@ -214,6 +241,16 @@ t('B2.7b', 'Mã gắn M3 nhưng chỉ bật 2 máy', 'Engine xếp máy khác; g
     const ui = fs.readFileSync(path.join(path.resolve(__dirname, '..'), 'ui.js'), 'utf8');
     const warned = ui.includes('mã gắn máy đang tắt');
     return { actual: `fixedMachine=${j.fixedMachine}, chạy M${j.owner}, ui.js có cảnh báo: ${warned ? 'có' : 'không'}`, pass: j.owner !== 3 && warned };
+  });
+t('B2.7c', 'Chọn máy [2, 3] (tắt M1): mã gắn M3 được giữ trên M3, mã gắn M1 (đang tắt) chuyển sang M2/M3', 'Y02 chạy M3, B02 chạy M2',
+  () => {
+    const R = E.simulate(mkP({ sortMode: 'stt', machineOrder: [2, 3],
+      skus: [sku('B02', 10000), sku('Y02', 10000)],
+      metaMap: { 'F:B02': { stt: 0, fixedMachine: 1 }, 'F:Y02': { stt: 1, fixedMachine: 3 } } }));
+    const jB = R.jobs.find(x => x.code === 'B02');
+    const jY = R.jobs.find(x => x.code === 'Y02');
+    return { actual: `B02(gắn M1 tắt)→M${jB.owner}, Y02(gắn M3 bật)→M${jY.owner}`,
+      pass: jB.owner === 2 && jY.owner === 3 };
   });
 
 // ---------- B2.8 Ưu tiên ----------
